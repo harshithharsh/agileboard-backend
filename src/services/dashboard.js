@@ -232,7 +232,6 @@ function sprintStats(sprint, data, historyByIssue) {
       open: defects.length - closed,
       uatPct: round(pct(uat, defects.length)),
       prodPct: round(pct(prod, defects.length)),
-      escapePct: round(pct(uat + prod, defects.length)),
     },
     compliance: {
       dor: share(items, 'dor_met'),
@@ -341,7 +340,6 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     card('velocity', 'Velocity', cur.velocity, prev?.velocity ?? null, 'SP', null),
     card('spillover', 'Spillover', cur.spilloverPct, prev?.spilloverPct ?? null, '%', targets.spillover),
     card('unplanned', 'Unplanned work', cur.unplannedPct, prev?.unplannedPct ?? null, '%', targets.unplanned),
-    card('defect_escape', 'Defect escape rate', cur.defects.escapePct, prev?.defects.escapePct ?? null, '%', targets.defect_escape),
   ];
 
   const healthRow = (key, label, value, unit, target) => ({
@@ -358,7 +356,6 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     healthRow('completion', 'Completion rate', cur.completion, '%', targets.completion),
     healthRow('spillover', 'Spillover', cur.spilloverPct, '%', targets.spillover),
     healthRow('unplanned', 'Unplanned work', cur.unplannedPct, '%', targets.unplanned),
-    healthRow('defect_escape', 'Defect escape rate', cur.defects.escapePct, '%', targets.defect_escape),
     healthRow('blocked_items', 'Blocked work', cur.blocked.items, '', targets.blocked_items),
     healthRow('dod_compliance', 'DoD compliance', cur.compliance.dod, '%', targets.dod_compliance),
   ];
