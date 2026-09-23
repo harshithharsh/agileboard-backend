@@ -187,11 +187,11 @@ function sprintStats(sprint, data, historyByIssue) {
   const prod = defects.filter((d) => d.found_in === 'prod').length;
 
   // NULL means "not tracked" (e.g. not available from Jira); report null when nothing is tracked
-  // Defect rate = stories ÷ open defects; defect density = achieved velocity ÷ open defects.
-  // Undefined (null) when no defects are open.
-  const openDefects = defects.length - closed;
+  // Defect rate = stories ÷ bugs created in the sprint; defect density = achieved velocity ÷ bugs created
+  // in the sprint. "Created in the sprint" = created between sprint start and close. Null when there are none.
+  const createdInSprint = defects.filter((d) => d.created_at >= start && d.created_at < end).length;
   const storyCount = items.filter((i) => i.type === 'story').length;
-  const perOpenDefect = (n) => (openDefects ? round(n / openDefects, 1) : null);
+  const perBugCreated = (n) => (createdInSprint ? round(n / createdInSprint, 1) : null);
 
   const share = (list, key) => {
     const tracked = list.filter((i) => i[key] !== null && i[key] !== undefined);
@@ -238,10 +238,11 @@ function sprintStats(sprint, data, historyByIssue) {
       open: defects.length - closed,
       uatPct: round(pct(uat, defects.length)),
       prodPct: round(pct(prod, defects.length)),
+      createdInSprint,
       stories: storyCount,
       achievedVelocity: completedCommitted,
-      defectRate: perOpenDefect(storyCount),
-      defectDensity: perOpenDefect(completedCommitted),
+      defectRate: perBugCreated(storyCount),
+      defectDensity: perBugCreated(completedCommitted),
     },
     compliance: {
       dor: share(items, 'dor_met'),
@@ -425,6 +426,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
         created: s.defects.created,
         closed: s.defects.closed,
         open: s.defects.open,
+        createdInSprint: s.defects.createdInSprint,
         stories: s.defects.stories,
         achievedVelocity: s.defects.achievedVelocity,
         defectRate: s.defects.defectRate,
