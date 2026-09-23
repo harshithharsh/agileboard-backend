@@ -165,7 +165,9 @@ function sprintStats(sprint, data, historyByIssue) {
     completed,
     spillover,
     predictability: round(pct(completedCommitted, committed)),
-    completion: round(pct(completed, scope)),
+    // % of completion = achieved velocity ÷ committed velocity, where achieved counts
+    // completed points from the sprint's commitment (work added mid-sprint is tracked as unplanned)
+    completion: round(pct(completedCommitted, committed)),
     businessValue: plannedStories.length ? round(pct(completedStories.length, plannedStories.length)) : null,
     stories: { planned: plannedStories.length, completed: completedStories.length },
     velocity: completed,

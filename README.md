@@ -48,7 +48,7 @@ All metrics are calculated in `src/services/dashboard.js` from the raw sprint da
 | Metric | Formula |
 |---|---|
 | Predictability | completed committed points ÷ committed points |
-| Completion | completed points ÷ (committed + added points) |
+| Completion | achieved velocity ÷ committed velocity: completed points from the sprint's commitment ÷ committed points |
 | Velocity | completed points |
 | Spillover | spillover points ÷ (committed + added points) |
 | Business value delivered | stories completed ÷ stories planned × 100 (planned = Story issues in the sprint at start; completed = those done when it closed) |
