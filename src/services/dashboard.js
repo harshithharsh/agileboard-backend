@@ -214,7 +214,7 @@ function burndown(sprint, stats) {
 // Dashboard assembly
 // ---------------------------------------------------------------------------
 
-function buildInsights(cur, health, velocityBand) {
+function buildInsights(cur, health, velocityBand, isActive) {
   const byKey = Object.fromEntries(health.map((h) => [h.key, h]));
   const ok = (k) => byKey[k]?.status === 'on_track';
   const wentWell = [];
@@ -240,7 +240,10 @@ function buildInsights(cur, health, velocityBand) {
 
   if (cur.spilloverPct > 0) risks.push(`${cur.spilloverPct}% of sprint scope (${cur.spillover} SP) spilled over to the next sprint.`);
   if (cur.blocked.items > 0) risks.push(`${cur.blocked.items} blocked item${cur.blocked.items > 1 ? 's' : ''} represent ${cur.blocked.totalDays} days of blocked time.`);
-  if (cur.defects.open > 0) risks.push(`${cur.defects.open} defect${cur.defects.open > 1 ? 's remain' : ' remains'} open at sprint end.`);
+  if (cur.defects.open > 0) {
+    risks.push(`${cur.defects.open} defect${cur.defects.open > 1 ? 's remain' : ' remains'} open${isActive ? '' : ' at sprint end'}.`);
+  }
+  if (isActive && cur.wip.current > 0) risks.push(`${cur.wip.current} item${cur.wip.current > 1 ? 's are' : ' is'} still in progress and may spill over.`);
 
   if (!ok('unplanned')) focus.push('Review mid-sprint scope additions before accepting new work.');
   if (cur.blocked.items > 0) focus.push('Clear the longest blocked item before the next checkpoint.');
@@ -277,10 +280,10 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
   const prev = stats.length > 1 ? stats[stats.length - 2] : null;
   const sprint = window[window.length - 1];
 
-  // Velocity "stable band": ±10% around the average of previous sprints
+  // Velocity "stable band": ±10% around the average of previous sprints (none for a team's first sprint)
   const prevVelocities = stats.slice(0, -1).map((s) => s.velocity);
-  const velocityAvg = prevVelocities.length ? sum(prevVelocities, (v) => v) / prevVelocities.length : cur.velocity;
-  const velocityBand = { low: Math.round(velocityAvg * 0.9), high: Math.round(velocityAvg * 1.1) };
+  const velocityAvg = prevVelocities.length ? sum(prevVelocities, (v) => v) / prevVelocities.length : null;
+  const velocityBand = velocityAvg === null ? null : { low: Math.round(velocityAvg * 0.9), high: Math.round(velocityAvg * 1.1) };
 
   const targetLabel = (t) => (t ? `${t.operator === '>=' ? '≥' : '≤'} ${t.value}${t.metric === 'blocked_items' ? '' : '%'}` : '');
   const card = (key, label, value, prevValue, unit, target) => ({
@@ -293,7 +296,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     target: target ? targetLabel(target) : 'Stable band',
     status: target
       ? (meetsTarget(value, target) ? 'on_track' : 'attention')
-      : value >= velocityBand.low && value <= velocityBand.high ? 'on_track' : 'attention',
+      : !velocityBand || (value >= velocityBand.low && value <= velocityBand.high) ? 'on_track' : 'attention',
     // for "higher is better" metrics the arrow colour flips
     higherIsBetter: !target || target.operator === '>=',
   });
@@ -359,7 +362,8 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
       throughput: {
         current: cur.throughput,
         previous: prev?.throughput ?? null,
-        average: previousThroughputs.length ? round(sum(stats, (s) => s.throughput) / stats.length) : cur.throughput,
+        average: previousThroughputs.length ? round(sum(stats, (s) => s.throughput) / stats.length) : null,
+        sprintsInAverage: stats.length,
       },
       wip: { ...cur.wip, limit: team.wip_limit },
       blocked: cur.blocked,
@@ -374,7 +378,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     sprintState,
     burndown: burndown(sprint, cur),
     compliance: cur.compliance,
-    insights: buildInsights(cur, health, velocityBand),
+    insights: buildInsights(cur, health, velocityBand, sprint.status === 'active'),
   };
 }
 
