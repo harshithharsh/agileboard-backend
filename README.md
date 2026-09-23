@@ -52,7 +52,7 @@ All metrics are calculated in `src/services/dashboard.js` from the raw sprint da
 | Completion | achieved velocity ÷ committed velocity: completed points from the sprint's commitment ÷ committed points |
 | Velocity | completed points |
 | Spillover | spillover points ÷ (committed + added points) |
-| Business value delivered | stories completed ÷ stories planned × 100 (planned = Story issues in the sprint at start; completed = those done when it closed) |
+| Business value delivered | stories completed ÷ total stories in the sprint × 100 (all Story issues in the sprint, planned or added; completed = done when it closed) |
 | Unplanned work | added points ÷ committed points |
 | Defect rate | number of stories in the sprint ÷ bugs created in the sprint (created between sprint start and close); empty when none were created |
 | Defect density | achieved velocity ÷ bugs created in the sprint; empty when none were created |

@@ -153,10 +153,10 @@ function sprintStats(sprint, data, historyByIssue) {
   const spillover = sum(items.filter((i) => i.outcome === 'spillover'), (i) => i.points);
   const scope = committed + added;
 
-  // Business Value Delivered % = Stories Completed ÷ Stories Planned × 100
-  // Planned = stories in the sprint at start; completed = those planned stories that were done.
-  const plannedStories = items.filter((i) => i.type === 'story' && i.commitment === 'committed');
-  const completedStories = plannedStories.filter((i) => i.outcome === 'completed');
+  // Business Value Delivered % = Stories Completed ÷ Total Stories in the Sprint × 100
+  // (all Story issues in the sprint, planned or added; completed = done when the sprint closed)
+  const sprintStories = items.filter((i) => i.type === 'story');
+  const completedStories = sprintStories.filter((i) => i.outcome === 'completed');
 
   // Flow
   const cycleDays = completedItems
@@ -211,8 +211,8 @@ function sprintStats(sprint, data, historyByIssue) {
     // % of completion = achieved velocity ÷ committed velocity, where achieved counts
     // completed points from the sprint's commitment (work added mid-sprint is tracked as unplanned)
     completion: round(pct(completedCommitted, committed)),
-    businessValue: plannedStories.length ? round(pct(completedStories.length, plannedStories.length)) : null,
-    stories: { planned: plannedStories.length, completed: completedStories.length },
+    businessValue: sprintStories.length ? round(pct(completedStories.length, sprintStories.length)) : null,
+    stories: { total: sprintStories.length, completed: completedStories.length },
     velocity: completed,
     spilloverPct: round(pct(spillover, scope)),
     unplannedPct: round(pct(added, committed)),
@@ -397,7 +397,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
       sprintId: s.id,
       sprint: s.name,
       businessValue: s.businessValue,
-      storiesPlanned: s.stories.planned,
+      storiesTotal: s.stories.total,
       storiesCompleted: s.stories.completed,
       committed: s.committed,
       completed: s.completed,
