@@ -41,6 +41,7 @@ Tests for the Jira mapping: `npm test`.
 | GET | `/api/filters` | Options for the filter bar: projects, teams, releases, sprints, assignees |
 | GET / POST | `/api/sync` | Last sync status / run a Jira sync now |
 | GET | `/api/dashboard?teamId=&sprintId=&assigneeId=&range=` | Everything the dashboard shows for one team and sprint. `sprintId` defaults to the latest sprint; `range` (1–6) sets how many sprints the trend charts include |
+| GET | `/api/dashboard?projectId=&sprintId=YYYY-MM-DD&…` | All of a project's teams combined. Sprints that start on the same day are combined into one period (e.g. "Nexo 12 / Vertex 13"); `sprintId` is that start date |
 
 ## How metrics are calculated
 All metrics are calculated in `src/services/dashboard.js` from the raw sprint data.
