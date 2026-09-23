@@ -187,6 +187,12 @@ function sprintStats(sprint, data, historyByIssue) {
   const prod = defects.filter((d) => d.found_in === 'prod').length;
 
   // NULL means "not tracked" (e.g. not available from Jira); report null when nothing is tracked
+  // Defect rate = stories ÷ open defects; defect density = achieved velocity ÷ open defects.
+  // Undefined (null) when no defects are open.
+  const openDefects = defects.length - closed;
+  const storyCount = items.filter((i) => i.type === 'story').length;
+  const perOpenDefect = (n) => (openDefects ? round(n / openDefects, 1) : null);
+
   const share = (list, key) => {
     const tracked = list.filter((i) => i[key] !== null && i[key] !== undefined);
     return tracked.length ? round(pct(tracked.filter((i) => i[key]).length, tracked.length)) : null;
@@ -232,6 +238,10 @@ function sprintStats(sprint, data, historyByIssue) {
       open: defects.length - closed,
       uatPct: round(pct(uat, defects.length)),
       prodPct: round(pct(prod, defects.length)),
+      stories: storyCount,
+      achievedVelocity: completedCommitted,
+      defectRate: perOpenDefect(storyCount),
+      defectDensity: perOpenDefect(completedCommitted),
     },
     compliance: {
       dor: share(items, 'dor_met'),
@@ -410,7 +420,16 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     scopeAddedPct: cur.unplannedPct,
     quality: {
       current: cur.defects,
-      trend: trend.map((s) => ({ sprint: s.name, created: s.defects.created, closed: s.defects.closed })),
+      trend: trend.map((s) => ({
+        sprint: s.name,
+        created: s.defects.created,
+        closed: s.defects.closed,
+        open: s.defects.open,
+        stories: s.defects.stories,
+        achievedVelocity: s.defects.achievedVelocity,
+        defectRate: s.defects.defectRate,
+        defectDensity: s.defects.defectDensity,
+      })),
     },
     health,
     sprintState,
