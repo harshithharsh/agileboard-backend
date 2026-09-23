@@ -1,12 +1,14 @@
 {
   "name": "agileboard-backend",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "AgileBoard REST API (Node.js + Express + PostgreSQL)",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "sync": "node scripts/sync.js",
+    "test": "node --test"
   },
   "license": "UNLICENSED",
   "dependencies": {

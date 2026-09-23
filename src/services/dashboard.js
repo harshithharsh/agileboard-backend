@@ -1,4 +1,5 @@
 import { query } from '../config/db.js';
+import { lastSync } from '../jira/sync.js';
 
 const DAY_MS = 86400000;
 const TREND_SPRINTS = 6; // history loaded for averages and trend charts
@@ -17,6 +18,10 @@ function percentile(values, p) {
   const hi = Math.ceil(idx);
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
+
+// A closed sprint ends when it was closed in Jira (which can be after its planned end date).
+const sprintEnd = (sprint) =>
+  sprint.completed_at ? new Date(Math.max(sprint.completed_at, endOfDay(sprint.end_date))) : endOfDay(sprint.end_date);
 
 function workingDays(start, end) {
   const days = [];
@@ -100,7 +105,7 @@ function statusAt(historyByIssue, issueId, at) {
 
 function sprintStats(sprint, data, historyByIssue) {
   const start = startOfDay(sprint.start_date);
-  const end = endOfDay(sprint.end_date);
+  const end = sprintEnd(sprint);
   const items = data.items.filter((i) => i.sprint_id === sprint.id);
   const completedItems = items.filter((i) => i.outcome === 'completed');
 
@@ -139,7 +144,11 @@ function sprintStats(sprint, data, historyByIssue) {
   const uat = defects.filter((d) => d.found_in === 'uat').length;
   const prod = defects.filter((d) => d.found_in === 'prod').length;
 
-  const share = (list, key) => round(pct(list.filter((i) => i[key]).length, list.length));
+  // NULL means "not tracked" (e.g. not available from Jira); report null when nothing is tracked
+  const share = (list, key) => {
+    const tracked = list.filter((i) => i[key] !== null && i[key] !== undefined);
+    return tracked.length ? round(pct(tracked.filter((i) => i[key]).length, tracked.length)) : null;
+  };
 
   return {
     id: sprint.id,
@@ -192,7 +201,8 @@ function sprintStats(sprint, data, historyByIssue) {
 }
 
 function burndown(sprint, stats) {
-  const days = workingDays(sprint.start_date, sprint.end_date);
+  const lastDay = sprintEnd(sprint).toISOString().slice(0, 10);
+  const days = workingDays(sprint.start_date, lastDay > sprint.end_date && sprint.completed_at ? lastDay : sprint.end_date);
   const initial = stats.committed;
   return days.map((d, i) => {
     const dayEnd = new Date(d.getTime() + DAY_MS);
@@ -213,46 +223,6 @@ function burndown(sprint, stats) {
 // ---------------------------------------------------------------------------
 // Dashboard assembly
 // ---------------------------------------------------------------------------
-
-function buildInsights(cur, health, velocityBand, isActive) {
-  const byKey = Object.fromEntries(health.map((h) => [h.key, h]));
-  const ok = (k) => byKey[k]?.status === 'on_track';
-  const wentWell = [];
-  const attention = [];
-  const risks = [];
-  const focus = [];
-
-  if (ok('predictability') && ok('completion')) {
-    wentWell.push(`Completion is ${cur.completion}% and predictability is ${cur.predictability}%, both meeting target.`);
-  } else {
-    if (ok('completion')) wentWell.push(`Completion is ${cur.completion}%, meeting the ${byKey.completion.targetLabel} target.`);
-    if (!ok('predictability')) attention.push(`Predictability is ${cur.predictability}%, below the ${byKey.predictability.targetLabel} target.`);
-    if (!ok('completion')) attention.push(`Completion is ${cur.completion}%, below the ${byKey.completion.targetLabel} target.`);
-  }
-  if (ok('defect_escape')) wentWell.push(`Defect escape is ${cur.defects.escapePct}%, below the ${byKey.defect_escape.target}% ceiling.`);
-  else attention.push(`Defect escape is ${cur.defects.escapePct}%, above the ${byKey.defect_escape.target}% ceiling.`);
-  if (velocityBand && cur.velocity >= velocityBand.low && cur.velocity <= velocityBand.high) {
-    wentWell.push(`Velocity of ${cur.velocity} SP is within the stable band (${velocityBand.low}–${velocityBand.high} SP).`);
-  }
-
-  if (!ok('unplanned')) attention.push(`Unplanned work is ${cur.unplannedPct}%, above the ${byKey.unplanned.target}% threshold.`);
-  if (cur.cycleTime.avg !== null) attention.push(`Cycle time is ${cur.cycleTime.avg} days average with a ${cur.cycleTime.p85} day P85.`);
-
-  if (cur.spilloverPct > 0) risks.push(`${cur.spilloverPct}% of sprint scope (${cur.spillover} SP) spilled over to the next sprint.`);
-  if (cur.blocked.items > 0) risks.push(`${cur.blocked.items} blocked item${cur.blocked.items > 1 ? 's' : ''} represent ${cur.blocked.totalDays} days of blocked time.`);
-  if (cur.defects.open > 0) {
-    risks.push(`${cur.defects.open} defect${cur.defects.open > 1 ? 's remain' : ' remains'} open${isActive ? '' : ' at sprint end'}.`);
-  }
-  if (isActive && cur.wip.current > 0) risks.push(`${cur.wip.current} item${cur.wip.current > 1 ? 's are' : ' is'} still in progress and may spill over.`);
-
-  if (!ok('unplanned')) focus.push('Review mid-sprint scope additions before accepting new work.');
-  if (cur.blocked.items > 0) focus.push('Clear the longest blocked item before the next checkpoint.');
-  if (!ok('spillover')) focus.push('Reduce committed scope to match recent velocity.');
-  if (!ok('defect_escape')) focus.push('Strengthen QA and UAT entry criteria to catch defects earlier.');
-  if (!focus.length) focus.push('Maintain the current commitment level and working agreements.');
-
-  return { wentWell, attention, risks, focus };
-}
 
 export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND_SPRINTS }) {
   const window = await loadSprintWindow(teamId, sprintId);
@@ -344,8 +314,9 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     context: {
       project: { id: team.project_id, name: team.project_name },
       team: { id: team.id, name: team.name, wipLimit: team.wip_limit },
-      sprint: { id: sprint.id, name: sprint.name, goal: sprint.goal, startDate: sprint.start_date, endDate: sprint.end_date, release: sprint.release_name, status: sprint.status },
+      sprint: { id: sprint.id, name: sprint.name, goal: sprint.goal, startDate: sprint.start_date, endDate: sprint.end_date, completedAt: sprint.completed_at, release: sprint.release_name, status: sprint.status },
       generatedAt: new Date().toISOString(),
+      sync: await lastSync(),
     },
     summary,
     delivery: trend.map((s, i) => ({
@@ -378,7 +349,6 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     sprintState,
     burndown: burndown(sprint, cur),
     compliance: cur.compliance,
-    insights: buildInsights(cur, health, velocityBand, sprint.status === 'active'),
   };
 }
 

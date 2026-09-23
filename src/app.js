@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { query } from './config/db.js';
 import dashboard from './routes/dashboard.js';
+import sync from './routes/sync.js';
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
@@ -17,6 +18,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.use('/api', dashboard);
+app.use('/api', sync);
 
 app.use((err, req, res, next) => {
   console.error(err);

@@ -1,0 +1,180 @@
+import { pool, query } from '../config/db.js';
+import { createJiraClient } from './client.js';
+import { transformIssue, pickSprints, mapSprintState } from './transform.js';
+
+const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
+let running = null; // only one sync at a time
+
+// Find the custom field ids for Sprint and Story Points (they differ between Jira sites).
+async function resolveFields(jira) {
+  const fields = await jira.fields();
+  const byName = (re) => fields.find((f) => re.test(f.name))?.id;
+  return {
+    sprint: process.env.JIRA_SPRINT_FIELD || fields.find((f) => f.schema?.custom === 'com.pyxis.greenhopper.jira:gh-sprint')?.id || byName(/^sprint$/i),
+    storyPoints: process.env.JIRA_STORY_POINTS_FIELD || byName(/^story point estimate$/i) || byName(/^story points?$/i),
+  };
+}
+
+async function upsertUser(client, assignee, teamId) {
+  if (!assignee) return null;
+  const { rows } = await client.query(
+    `INSERT INTO users (name, email, jira_account_id) VALUES ($1, $2, $3)
+     ON CONFLICT (jira_account_id) DO UPDATE SET name = EXCLUDED.name, email = COALESCE(EXCLUDED.email, users.email)
+     RETURNING id`,
+    [assignee.name, assignee.email, assignee.accountId]
+  );
+  await client.query('INSERT INTO team_members (team_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [teamId, rows[0].id]);
+  return rows[0].id;
+}
+
+async function upsertRelease(client, projectId, version) {
+  const { rows } = await client.query(
+    `INSERT INTO releases (project_id, name, target_date) VALUES ($1, $2, $3)
+     ON CONFLICT (project_id, name) DO UPDATE SET target_date = COALESCE(EXCLUDED.target_date, releases.target_date)
+     RETURNING id`,
+    [projectId, version.name, version.releaseDate]
+  );
+  return rows[0].id;
+}
+
+// Write one sprint and all of its issues in a single transaction.
+async function saveSprint(team, sprint, records) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Release = the fix version most issues in the sprint point at
+    const counts = new Map();
+    for (const r of records) for (const v of r.fixVersions) counts.set(v.name, (counts.get(v.name) || 0) + 1);
+    const topVersion = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const releaseId = topVersion
+      ? await upsertRelease(client, team.project_id, records.flatMap((r) => r.fixVersions).find((v) => v.name === topVersion[0]))
+      : null;
+
+    const day = (v) => (v ? v.slice(0, 10) : null);
+    const { rows: [saved] } = await client.query(
+      `INSERT INTO sprints (team_id, release_id, name, goal, start_date, end_date, started_at, completed_at, status, jira_sprint_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (jira_sprint_id) DO UPDATE SET
+         team_id = EXCLUDED.team_id, release_id = EXCLUDED.release_id, name = EXCLUDED.name, goal = EXCLUDED.goal,
+         start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date, started_at = EXCLUDED.started_at,
+         completed_at = EXCLUDED.completed_at, status = EXCLUDED.status
+       RETURNING id`,
+      [team.id, releaseId, sprint.name, sprint.goal || null, day(sprint.startDate), day(sprint.endDate) || day(sprint.startDate),
+        sprint.startDate || null, sprint.completeDate || null, mapSprintState(sprint.state), sprint.id]
+    );
+
+    await client.query('DELETE FROM sprint_issues WHERE sprint_id = $1', [saved.id]);
+    await client.query('DELETE FROM defects WHERE sprint_id = $1', [saved.id]);
+
+    for (const r of records) {
+      const assigneeId = await upsertUser(client, r.assignee, team.id);
+      const { rows: [issue] } = await client.query(
+        `INSERT INTO issues (project_id, issue_key, title, type, story_points, assignee_id, status, jira_status,
+                             started_at, completed_at, dod_met, has_acceptance_criteria, created_at, jira_issue_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         ON CONFLICT (jira_issue_id) DO UPDATE SET
+           issue_key = EXCLUDED.issue_key, title = EXCLUDED.title, type = EXCLUDED.type, story_points = EXCLUDED.story_points,
+           assignee_id = EXCLUDED.assignee_id, status = EXCLUDED.status, jira_status = EXCLUDED.jira_status,
+           started_at = EXCLUDED.started_at, completed_at = EXCLUDED.completed_at, dod_met = EXCLUDED.dod_met,
+           has_acceptance_criteria = EXCLUDED.has_acceptance_criteria
+         RETURNING id`,
+        [team.project_id, r.key, r.title, r.type, r.points, assigneeId, r.status, r.jiraStatus,
+          r.startedAt, r.completedAt, r.compliance.dod, r.compliance.acceptanceCriteria, r.createdAt, r.jiraId]
+      );
+
+      await client.query(
+        `INSERT INTO sprint_issues (sprint_id, issue_id, commitment, outcome, points, added_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [saved.id, issue.id, r.membership.commitment, r.membership.outcome, r.membership.points, r.membership.addedAt]
+      );
+
+      await client.query('DELETE FROM issue_status_history WHERE issue_id = $1', [issue.id]);
+      for (const h of r.history) {
+        await client.query('INSERT INTO issue_status_history (issue_id, from_status, to_status, changed_at) VALUES ($1, $2, $3, $4)',
+          [issue.id, h.from, h.to, h.at]);
+      }
+      await client.query('DELETE FROM blocked_periods WHERE issue_id = $1', [issue.id]);
+      for (const b of r.blocked) {
+        await client.query('INSERT INTO blocked_periods (issue_id, reason, external, started_at, ended_at) VALUES ($1, $2, $3, $4, $5)',
+          [issue.id, b.reason, b.external, b.started_at, b.ended_at]);
+      }
+      if (r.defect) {
+        const d = r.defect;
+        await client.query(
+          `INSERT INTO defects (project_id, sprint_id, issue_id, title, severity, found_in, created_at, closed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [team.project_id, saved.id, issue.id, d.title, d.severity, d.foundIn, d.createdAt, d.closedAt]
+        );
+      }
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function syncTeam(jira, team, fields, statusById, log) {
+  const all = await jira.boardSprints(team.jira_board_id);
+  const sprints = pickSprints(all, team.jira_board_id, SYNC_CLOSED_SPRINTS);
+  log(`${team.name} (board ${team.jira_board_id}): ${sprints.map((s) => s.name).join(', ') || 'no sprints'}`);
+
+  const requestFields = ['summary', 'status', 'issuetype', 'assignee', 'created', 'resolutiondate', 'labels',
+    'environment', 'priority', 'fixVersions', 'description', fields.storyPoints, fields.sprint].filter(Boolean);
+
+  for (const sprint of sprints) {
+    const issues = (await jira.sprintIssues(sprint.id, requestFields)).filter(
+      (i) => !i.fields.issuetype?.subtask && !/epic/i.test(i.fields.issuetype?.name || '')
+    );
+    const records = [];
+    for (const issue of issues) {
+      let histories = issue.changelog?.histories || [];
+      if (issue.changelog && issue.changelog.total > histories.length) histories = await jira.issueChangelog(issue.id);
+      records.push(transformIssue(issue, histories, { sprint, fields, statusById }));
+    }
+    await saveSprint(team, sprint, records);
+    log(`  ${sprint.name} [${sprint.state}]: ${records.length} issues`);
+  }
+  return sprints.length;
+}
+
+// `jira` can be injected (e.g. a stub in tests); by default a real client is created from .env
+export async function syncFromJira({ log = console.log, jira: injected } = {}) {
+  if (running) return running;
+  running = (async () => {
+    const { rows: [run] } = await query(`INSERT INTO sync_runs DEFAULT VALUES RETURNING id`);
+    try {
+      const jira = injected ?? createJiraClient();
+      const fields = await resolveFields(jira);
+      if (!fields.sprint) throw new Error('Could not find the Sprint field in Jira');
+      log(`Jira fields: sprint=${fields.sprint}, story points=${fields.storyPoints ?? 'not found'}`);
+      const statuses = await jira.statuses();
+      const statusById = new Map(statuses.map((s) => [String(s.id), { name: s.name, category: s.statusCategory?.key }]));
+
+      const { rows: teams } = await query('SELECT * FROM teams WHERE jira_board_id IS NOT NULL ORDER BY name');
+      let sprintCount = 0;
+      for (const team of teams) sprintCount += await syncTeam(jira, team, fields, statusById, log);
+
+      const message = `Synced ${sprintCount} sprints for ${teams.length} teams`;
+      await query(`UPDATE sync_runs SET status = 'success', finished_at = now(), message = $2 WHERE id = $1`, [run.id, message]);
+      log(message);
+      return { status: 'success', message };
+    } catch (err) {
+      await query(`UPDATE sync_runs SET status = 'failed', finished_at = now(), message = $2 WHERE id = $1`, [run.id, err.message]);
+      throw err;
+    }
+  })().finally(() => {
+    running = null;
+  });
+  return running;
+}
+
+export async function lastSync() {
+  const { rows } = await query(
+    `SELECT status, started_at, finished_at, message FROM sync_runs ORDER BY started_at DESC LIMIT 1`
+  );
+  const { rows: ok } = await query(`SELECT finished_at FROM sync_runs WHERE status = 'success' ORDER BY finished_at DESC LIMIT 1`);
+  return { latest: rows[0] || null, lastSuccessAt: ok[0]?.finished_at || null };
+}
