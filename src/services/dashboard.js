@@ -40,55 +40,19 @@ function meetsTarget(value, target) {
 // Data loading
 // ---------------------------------------------------------------------------
 
-// "Nexo Sprint 13" -> "Nexo 13" (used when several teams' sprints share one label)
-const shortName = (name) => name.replace(/\s*sprint\s*/i, ' ').trim();
-
-// Sprints that start on the same day across the project's teams form one combined period.
-export function groupIntoPeriods(sprints) {
-  const byStart = new Map();
-  for (const s of sprints) {
-    if (!byStart.has(s.start_date)) byStart.set(s.start_date, []);
-    byStart.get(s.start_date).push(s);
-  }
-  return [...byStart.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([start, group]) => {
-      group.sort((a, b) => a.team_name.localeCompare(b.team_name));
-      const allClosed = group.every((s) => s.status === 'completed');
-      return {
-        id: start, // period key = shared start date
-        ids: group.map((s) => s.id),
-        name: group.map((s) => shortName(s.name)).join(' / '),
-        sprintNames: group.map((s) => s.name),
-        goal: group.filter((s) => s.goal).map((s) => `${s.team_name}: ${s.goal}`).join('\n') || null,
-        start_date: start,
-        end_date: group.map((s) => s.end_date).sort().at(-1),
-        completed_at: allClosed ? new Date(Math.max(...group.map((s) => s.completed_at || 0))) : null,
-        status: group.some((s) => s.status === 'active') ? 'active' : allClosed ? 'completed' : 'planned',
-        release_ids: [...new Set(group.map((s) => s.release_id).filter(Boolean))],
-        release_name: [...new Set(group.map((s) => s.release_name).filter(Boolean))].join(', ') || null,
-        sprints: group, // the individual team sprints, used for the team-average view
-      };
-    });
-}
-
-// Returns the selected sprint period plus the ones before it (up to TREND_SPRINTS).
-// Team view: one period per sprint. All-teams view: sprints grouped by start date.
-async function loadSprintWindow({ teamId, projectId, sprintId }) {
+// Returns the selected sprint plus the ones before it (up to TREND_SPRINTS) for one team.
+async function loadSprintWindow(teamId, sprintId) {
   const { rows: all } = await query(
-    `SELECT s.*, r.name AS release_name, t.name AS team_name
-       FROM sprints s
-       JOIN teams t ON t.id = s.team_id
-       LEFT JOIN releases r ON r.id = s.release_id
-      WHERE ${teamId ? 's.team_id = $1' : 't.project_id = $1'}
+    `SELECT s.*, r.name AS release_name
+       FROM sprints s LEFT JOIN releases r ON r.id = s.release_id
+      WHERE s.team_id = $1
       ORDER BY s.start_date`,
-    [teamId || projectId]
+    [teamId]
   );
   if (!all.length) return [];
-  const periods = teamId ? all.map((s) => ({ ...s, ids: [s.id] })) : groupIntoPeriods(all);
-  const idx = sprintId ? periods.findIndex((p) => p.id === sprintId) : periods.length - 1;
+  const idx = sprintId ? all.findIndex((s) => s.id === sprintId) : all.length - 1;
   if (idx === -1) return [];
-  return periods.slice(Math.max(0, idx - TREND_SPRINTS + 1), idx + 1);
+  return all.slice(Math.max(0, idx - TREND_SPRINTS + 1), idx + 1);
 }
 
 async function loadData(sprintIds, assigneeId) {
@@ -143,8 +107,7 @@ function statusAt(historyByIssue, issueId, at) {
 function sprintStats(sprint, data, historyByIssue) {
   const start = startOfDay(sprint.start_date);
   const end = sprintEnd(sprint);
-  const inSprint = new Set(sprint.ids);
-  const items = data.items.filter((i) => inSprint.has(i.sprint_id));
+  const items = data.items.filter((i) => i.sprint_id === sprint.id);
   const completedItems = items.filter((i) => i.outcome === 'completed');
 
   const committed = sum(items.filter((i) => i.commitment === 'committed'), (i) => i.points);
@@ -182,7 +145,7 @@ function sprintStats(sprint, data, historyByIssue) {
   const externalIssues = new Set(blockedPeriods.filter((b) => b.external).map((b) => b.issue_id));
 
   // Quality
-  const defects = data.defects.filter((d) => inSprint.has(d.sprint_id));
+  const defects = data.defects.filter((d) => d.sprint_id === sprint.id);
   const closed = defects.filter((d) => d.closed_at && d.closed_at <= end).length;
   const uat = defects.filter((d) => d.found_in === 'uat').length;
   const prod = defects.filter((d) => d.found_in === 'prod').length;
@@ -278,73 +241,21 @@ function burndown(sprint, stats) {
 }
 
 // ---------------------------------------------------------------------------
-// Team-average view: each team's sprint is measured on its own, then averaged
-// ---------------------------------------------------------------------------
-
-const mean = (values) => {
-  const nums = values.filter((v) => typeof v === 'number');
-  return nums.length ? round(sum(nums, (v) => v) / nums.length, 1) : null;
-};
-
-// Average every number field across the teams' stats (recursing into nested objects);
-// lists (issues, blocked items) are combined, and text fields are taken from the first team.
-export function averageFields(objs) {
-  const out = {};
-  for (const key of Object.keys(objs[0])) {
-    const values = objs.map((o) => o?.[key]);
-    const sample = values.find((v) => v !== null && v !== undefined);
-    if (Array.isArray(sample)) out[key] = values.flatMap((v) => v || []);
-    else if (sample instanceof Date || typeof sample !== 'object' || sample === undefined) {
-      out[key] = values.some((v) => typeof v === 'number') ? mean(values) : sample ?? null;
-    } else out[key] = averageFields(values.map((v) => v ?? {}));
-  }
-  return out;
-}
-
-function averagePeriodStats(period, data, historyByIssue) {
-  const perTeam = period.sprints.map((s) => sprintStats({ ...s, ids: [s.id] }, data, historyByIssue));
-  return { ...averageFields(perTeam), id: period.id, name: period.name, startDate: period.start_date, endDate: period.end_date, perTeam };
-}
-
-// Average the teams' burndowns day by day (sprints can differ by a day in length).
-function averageBurndown(period, stats) {
-  const lines = period.sprints.map((s, i) => burndown(s, stats.perTeam[i]));
-  const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), []);
-  return longest.map((day, i) => ({
-    ...day,
-    ideal: mean(lines.map((l) => l[i]?.ideal)),
-    actual: mean(lines.map((l) => l[i]?.actual)),
-  }));
-}
-
-// ---------------------------------------------------------------------------
 // Dashboard assembly
 // ---------------------------------------------------------------------------
 
-// teamId = one team; without teamId, projectId = all of the project's teams combined, either as
-// a total (combine = 'total': points and counts added up) or a team average (combine = 'average').
-export async function getDashboard({ teamId, projectId, sprintId, assigneeId, range = TREND_SPRINTS, combine = 'total' }) {
-  const window = await loadSprintWindow({ teamId, projectId, sprintId });
+export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND_SPRINTS }) {
+  const window = await loadSprintWindow(teamId, sprintId);
   if (!window.length) return null;
 
   const [{ rows: teamRows }, data] = await Promise.all([
     query(
-      `SELECT t.*, p.id AS project_id, p.name AS project_name FROM teams t JOIN projects p ON p.id = t.project_id
-        WHERE ${teamId ? 't.id = $1' : 't.project_id = $1'} ORDER BY t.name`,
-      [teamId || projectId]
+      `SELECT t.*, p.id AS project_id, p.name AS project_name FROM teams t JOIN projects p ON p.id = t.project_id WHERE t.id = $1`,
+      [teamId]
     ),
-    loadData(window.flatMap((s) => s.ids), assigneeId),
+    loadData(window.map((s) => s.id), assigneeId),
   ]);
-  const team = teamId
-    ? teamRows[0]
-    : {
-        id: null,
-        name: 'All Teams',
-        teams: teamRows.map((t) => t.name),
-        wip_limit: combine === 'average' ? mean(teamRows.map((t) => t.wip_limit)) : sum(teamRows, (t) => t.wip_limit),
-        project_id: teamRows[0].project_id,
-        project_name: teamRows[0].project_name,
-      };
+  const team = teamRows[0];
   const { rows: targetRows } = await query('SELECT metric, operator, value::float AS value FROM metric_targets WHERE project_id = $1', [team.project_id]);
   const targets = Object.fromEntries(targetRows.map((t) => [t.metric, t]));
 
@@ -354,10 +265,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     historyByIssue.get(h.issue_id).push(h);
   }
 
-  const averaging = !teamId && combine === 'average';
-  const stats = window.map((s) =>
-    averaging ? averagePeriodStats(s, data, historyByIssue) : sprintStats(s, data, historyByIssue)
-  );
+  const stats = window.map((s) => sprintStats(s, data, historyByIssue));
   const cur = stats[stats.length - 1];
   const prev = stats.length > 1 ? stats[stats.length - 2] : null;
   const sprint = window[window.length - 1];
@@ -432,9 +340,8 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
   return {
     context: {
       project: { id: team.project_id, name: team.project_name },
-      team: { id: team.id, name: team.name, teams: team.teams ?? [team.name], wipLimit: team.wip_limit },
-      combine: teamId ? null : averaging ? 'average' : 'total',
-      sprint: { id: sprint.id, name: sprint.name, sprintNames: sprint.sprintNames ?? [sprint.name], goal: sprint.goal, startDate: sprint.start_date, endDate: sprint.end_date, completedAt: sprint.completed_at, release: sprint.release_name, status: sprint.status },
+      team: { id: team.id, name: team.name, wipLimit: team.wip_limit },
+      sprint: { id: sprint.id, name: sprint.name, goal: sprint.goal, startDate: sprint.start_date, endDate: sprint.end_date, completedAt: sprint.completed_at, release: sprint.release_name, status: sprint.status },
       generatedAt: new Date().toISOString(),
       sync: await lastSync(),
     },
@@ -481,7 +388,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     },
     health,
     sprintState,
-    burndown: averaging ? averageBurndown(sprint, cur) : burndown(sprint, cur),
+    burndown: burndown(sprint, cur),
     compliance: cur.compliance,
   };
 }
@@ -491,11 +398,7 @@ export async function getFilters() {
     query('SELECT id, key, name FROM projects ORDER BY name'),
     query('SELECT id, project_id, name FROM teams ORDER BY name'),
     query('SELECT id, project_id, name FROM releases ORDER BY name'),
-    query(
-      `SELECT s.id, s.team_id, t.project_id, t.name AS team_name, s.release_id, s.name, s.goal,
-              s.start_date, s.end_date, s.completed_at, s.status
-         FROM sprints s JOIN teams t ON t.id = s.team_id ORDER BY s.start_date DESC`
-    ),
+    query('SELECT id, team_id, release_id, name, start_date, end_date, status FROM sprints ORDER BY start_date DESC'),
     query(
       `SELECT u.id, u.name, tm.team_id FROM users u JOIN team_members tm ON tm.user_id = u.id ORDER BY u.name`
     ),
@@ -504,13 +407,7 @@ export async function getFilters() {
     projects: projects.rows,
     teams: teams.rows,
     releases: releases.rows,
-    sprints: sprints.rows.map(({ goal, completed_at, team_name, ...s }) => s),
-    // Combined sprint periods for the "All teams" view (sprints grouped by start date)
-    periods: projects.rows.flatMap((p) =>
-      groupIntoPeriods(sprints.rows.filter((s) => s.project_id === p.id))
-        .reverse()
-        .map(({ id, name, start_date, end_date, status, release_ids }) => ({ id, project_id: p.id, name, start_date, end_date, status, release_ids }))
-    ),
+    sprints: sprints.rows,
     assignees: members.rows,
   };
 }
