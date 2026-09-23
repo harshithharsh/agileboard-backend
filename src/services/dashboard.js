@@ -297,7 +297,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     ? teamRows[0]
     : {
         id: null,
-        name: 'All teams',
+        name: 'All Teams',
         teams: teamRows.map((t) => t.name),
         wip_limit: sum(teamRows, (t) => t.wip_limit),
         project_id: teamRows[0].project_id,
@@ -346,11 +346,11 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
   });
 
   const summary = [
-    card('predictability', 'Sprint predictability', cur.predictability, prev?.predictability ?? null, '%', targets.predictability),
-    card('completion', 'Sprint completion', cur.completion, prev?.completion ?? null, '%', targets.completion),
+    card('predictability', 'Sprint Predictability', cur.predictability, prev?.predictability ?? null, '%', targets.predictability),
+    card('completion', 'Sprint Completion', cur.completion, prev?.completion ?? null, '%', targets.completion),
     card('velocity', 'Velocity', cur.velocity, prev?.velocity ?? null, 'SP', null),
     card('spillover', 'Spillover', cur.spilloverPct, prev?.spilloverPct ?? null, '%', targets.spillover),
-    card('unplanned', 'Unplanned work', cur.unplannedPct, prev?.unplannedPct ?? null, '%', targets.unplanned),
+    card('unplanned', 'Unplanned Work', cur.unplannedPct, prev?.unplannedPct ?? null, '%', targets.unplanned),
   ];
 
   const healthRow = (key, label, value, unit, target) => ({
@@ -363,12 +363,12 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     status: pending(key) ? 'in_progress' : meetsTarget(value, target) ? 'on_track' : 'attention',
   });
   const health = [
-    healthRow('predictability', 'Sprint predictability', cur.predictability, '%', targets.predictability),
-    healthRow('completion', 'Completion rate', cur.completion, '%', targets.completion),
+    healthRow('predictability', 'Sprint Predictability', cur.predictability, '%', targets.predictability),
+    healthRow('completion', 'Completion Rate', cur.completion, '%', targets.completion),
     healthRow('spillover', 'Spillover', cur.spilloverPct, '%', targets.spillover),
-    healthRow('unplanned', 'Unplanned work', cur.unplannedPct, '%', targets.unplanned),
-    healthRow('blocked_items', 'Blocked work', cur.blocked.items, '', targets.blocked_items),
-    healthRow('dod_compliance', 'DoD compliance', cur.compliance.dod, '%', targets.dod_compliance),
+    healthRow('unplanned', 'Unplanned Work', cur.unplannedPct, '%', targets.unplanned),
+    healthRow('blocked_items', 'Blocked Work', cur.blocked.items, '', targets.blocked_items),
+    healthRow('dod_compliance', 'DoD Compliance', cur.compliance.dod, '%', targets.dod_compliance),
   ];
   const attentionCount = health.filter((h) => h.status === 'attention').length;
   const sprintState = isActive
