@@ -29,3 +29,16 @@ test('a period ends with its latest sprint and is active while any sprint is', (
   assert.equal(p.end_date, '2026-09-08');
   assert.equal(p.status, 'active');
 });
+
+test('averageFields averages numbers (ignoring nulls), recurses into objects and combines lists', async () => {
+  const { averageFields } = await import('../src/services/dashboard.js');
+  const avg = averageFields([
+    { name: 'Nexo', velocity: 77, completion: 100, cycleTime: { avg: 2, p85: null }, items: [1, 2] },
+    { name: 'Vertex', velocity: 92, completion: 91, cycleTime: { avg: 3, p85: 6 }, items: [3] },
+  ]);
+  assert.equal(avg.velocity, 84.5);
+  assert.equal(avg.completion, 95.5);
+  assert.deepEqual(avg.cycleTime, { avg: 2.5, p85: 6 });
+  assert.deepEqual(avg.items, [1, 2, 3]);
+  assert.equal(avg.name, 'Nexo');
+});

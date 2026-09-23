@@ -14,10 +14,11 @@ router.get('/filters', async (req, res, next) => {
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Full dashboard for one team, or for all of a project's teams combined.
-// Query: teamId (one team) or projectId (all teams), sprintId (default: latest; in the all-teams view
+// Query: teamId (one team) or projectId (all teams; combine = total | average), sprintId (default: latest; in the all-teams view
 // this is the period's start date, YYYY-MM-DD), assigneeId, range (1–6 sprints for trend charts)
 router.get('/dashboard', async (req, res, next) => {
-  const { teamId, projectId, sprintId, assigneeId, range } = req.query;
+  const { teamId, projectId, sprintId, assigneeId, range, combine } = req.query;
+  if (combine && !['total', 'average'].includes(combine)) return res.status(400).json({ error: 'combine must be total or average' });
   if (!UUID.test(teamId || '') && !UUID.test(projectId || '')) {
     return res.status(400).json({ error: 'teamId or projectId is required' });
   }
@@ -25,7 +26,7 @@ router.get('/dashboard', async (req, res, next) => {
   if (sprintId && !(teamId ? UUID : DATE).test(sprintId)) return res.status(400).json({ error: 'sprintId is not valid' });
   try {
     const data = await getDashboard({
-      teamId: teamId || null, projectId, sprintId, assigneeId, range: range ? Number(range) : undefined,
+      teamId: teamId || null, projectId, sprintId, assigneeId, range: range ? Number(range) : undefined, combine,
     });
     if (!data) return res.status(404).json({ error: 'No sprints found for this team' });
     res.json(data);

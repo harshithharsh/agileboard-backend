@@ -67,6 +67,7 @@ export function groupIntoPeriods(sprints) {
         status: group.some((s) => s.status === 'active') ? 'active' : allClosed ? 'completed' : 'planned',
         release_ids: [...new Set(group.map((s) => s.release_id).filter(Boolean))],
         release_name: [...new Set(group.map((s) => s.release_name).filter(Boolean))].join(', ') || null,
+        sprints: group, // the individual team sprints, used for the team-average view
       };
     });
 }
@@ -277,11 +278,52 @@ function burndown(sprint, stats) {
 }
 
 // ---------------------------------------------------------------------------
+// Team-average view: each team's sprint is measured on its own, then averaged
+// ---------------------------------------------------------------------------
+
+const mean = (values) => {
+  const nums = values.filter((v) => typeof v === 'number');
+  return nums.length ? round(sum(nums, (v) => v) / nums.length, 1) : null;
+};
+
+// Average every number field across the teams' stats (recursing into nested objects);
+// lists (issues, blocked items) are combined, and text fields are taken from the first team.
+export function averageFields(objs) {
+  const out = {};
+  for (const key of Object.keys(objs[0])) {
+    const values = objs.map((o) => o?.[key]);
+    const sample = values.find((v) => v !== null && v !== undefined);
+    if (Array.isArray(sample)) out[key] = values.flatMap((v) => v || []);
+    else if (sample instanceof Date || typeof sample !== 'object' || sample === undefined) {
+      out[key] = values.some((v) => typeof v === 'number') ? mean(values) : sample ?? null;
+    } else out[key] = averageFields(values.map((v) => v ?? {}));
+  }
+  return out;
+}
+
+function averagePeriodStats(period, data, historyByIssue) {
+  const perTeam = period.sprints.map((s) => sprintStats({ ...s, ids: [s.id] }, data, historyByIssue));
+  return { ...averageFields(perTeam), id: period.id, name: period.name, startDate: period.start_date, endDate: period.end_date, perTeam };
+}
+
+// Average the teams' burndowns day by day (sprints can differ by a day in length).
+function averageBurndown(period, stats) {
+  const lines = period.sprints.map((s, i) => burndown(s, stats.perTeam[i]));
+  const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), []);
+  return longest.map((day, i) => ({
+    ...day,
+    ideal: mean(lines.map((l) => l[i]?.ideal)),
+    actual: mean(lines.map((l) => l[i]?.actual)),
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard assembly
 // ---------------------------------------------------------------------------
 
-// teamId = one team; without teamId, projectId = all of the project's teams combined.
-export async function getDashboard({ teamId, projectId, sprintId, assigneeId, range = TREND_SPRINTS }) {
+// teamId = one team; without teamId, projectId = all of the project's teams combined, either as
+// a total (combine = 'total': points and counts added up) or a team average (combine = 'average').
+export async function getDashboard({ teamId, projectId, sprintId, assigneeId, range = TREND_SPRINTS, combine = 'total' }) {
   const window = await loadSprintWindow({ teamId, projectId, sprintId });
   if (!window.length) return null;
 
@@ -299,7 +341,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
         id: null,
         name: 'All Teams',
         teams: teamRows.map((t) => t.name),
-        wip_limit: sum(teamRows, (t) => t.wip_limit),
+        wip_limit: combine === 'average' ? mean(teamRows.map((t) => t.wip_limit)) : sum(teamRows, (t) => t.wip_limit),
         project_id: teamRows[0].project_id,
         project_name: teamRows[0].project_name,
       };
@@ -312,7 +354,10 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     historyByIssue.get(h.issue_id).push(h);
   }
 
-  const stats = window.map((s) => sprintStats(s, data, historyByIssue));
+  const averaging = !teamId && combine === 'average';
+  const stats = window.map((s) =>
+    averaging ? averagePeriodStats(s, data, historyByIssue) : sprintStats(s, data, historyByIssue)
+  );
   const cur = stats[stats.length - 1];
   const prev = stats.length > 1 ? stats[stats.length - 2] : null;
   const sprint = window[window.length - 1];
@@ -388,6 +433,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     context: {
       project: { id: team.project_id, name: team.project_name },
       team: { id: team.id, name: team.name, teams: team.teams ?? [team.name], wipLimit: team.wip_limit },
+      combine: teamId ? null : averaging ? 'average' : 'total',
       sprint: { id: sprint.id, name: sprint.name, sprintNames: sprint.sprintNames ?? [sprint.name], goal: sprint.goal, startDate: sprint.start_date, endDate: sprint.end_date, completedAt: sprint.completed_at, release: sprint.release_name, status: sprint.status },
       generatedAt: new Date().toISOString(),
       sync: await lastSync(),
@@ -435,7 +481,7 @@ export async function getDashboard({ teamId, projectId, sprintId, assigneeId, ra
     },
     health,
     sprintState,
-    burndown: burndown(sprint, cur),
+    burndown: averaging ? averageBurndown(sprint, cur) : burndown(sprint, cur),
     compliance: cur.compliance,
   };
 }
