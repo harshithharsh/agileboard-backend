@@ -255,6 +255,11 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
   const velocityAvg = prevVelocities.length ? sum(prevVelocities, (v) => v) / prevVelocities.length : null;
   const velocityBand = velocityAvg === null ? null : { low: Math.round(velocityAvg * 0.9), high: Math.round(velocityAvg * 1.1) };
 
+  // While a sprint is running, outcome metrics (completion etc.) can't be judged yet
+  const isActive = sprint.status === 'active';
+  const OUTCOME_METRICS = ['predictability', 'completion', 'velocity', 'spillover'];
+  const pending = (key) => isActive && OUTCOME_METRICS.includes(key);
+
   const targetLabel = (t) => (t ? `${t.operator === '>=' ? '≥' : '≤'} ${t.value}${t.metric === 'blocked_items' ? '' : '%'}` : '');
   const card = (key, label, value, prevValue, unit, target) => ({
     key,
@@ -262,9 +267,11 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     value,
     unit,
     prior: prevValue,
-    delta: prevValue === null ? null : round(value - prevValue, 1),
+    delta: prevValue === null || pending(key) ? null : round(value - prevValue, 1),
     target: target ? targetLabel(target) : 'Stable band',
-    status: target
+    status: pending(key)
+      ? 'in_progress'
+      : target
       ? (meetsTarget(value, target) ? 'on_track' : 'attention')
       : !velocityBand || (value >= velocityBand.low && value <= velocityBand.high) ? 'on_track' : 'attention',
     // for "higher is better" metrics the arrow colour flips
@@ -287,7 +294,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     unit,
     target: target?.value,
     targetLabel: targetLabel(target),
-    status: meetsTarget(value, target) ? 'on_track' : 'attention',
+    status: pending(key) ? 'in_progress' : meetsTarget(value, target) ? 'on_track' : 'attention',
   });
   const health = [
     healthRow('predictability', 'Sprint predictability', cur.predictability, '%', targets.predictability),
@@ -299,7 +306,9 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     healthRow('dod_compliance', 'DoD compliance', cur.compliance.dod, '%', targets.dod_compliance),
   ];
   const attentionCount = health.filter((h) => h.status === 'attention').length;
-  const sprintState = attentionCount === 0 ? 'on_track' : attentionCount === 1 ? 'attention' : 'at_risk';
+  const sprintState = isActive
+    ? 'in_progress'
+    : attentionCount === 0 ? 'on_track' : attentionCount === 1 ? 'attention' : 'at_risk';
 
   const trend = stats.slice(-Math.max(1, Number(range) || TREND_SPRINTS));
   const rolling = (i) => {
