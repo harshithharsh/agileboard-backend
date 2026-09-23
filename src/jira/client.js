@@ -29,7 +29,9 @@ export function createJiraClient(config = jiraConfig()) {
     }
     if (!res.ok) {
       const body = await res.text();
-      const hint = res.status === 401 ? ' (check JIRA_EMAIL / JIRA_API_TOKEN)' : '';
+      const hint = res.status === 401
+        ? ' (Jira rejected the login: check JIRA_EMAIL and that JIRA_API_TOKEN is one valid token, pasted once)'
+        : '';
       throw new Error(`Jira ${res.status} on ${url.pathname}${hint}: ${body.slice(0, 300)}`);
     }
     return res.json();

@@ -147,6 +147,8 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
     const { rows: [run] } = await query(`INSERT INTO sync_runs DEFAULT VALUES RETURNING id`);
     try {
       const jira = injected ?? createJiraClient();
+      // Check the login first: without it Jira still answers some calls, which hides the real problem
+      if (!injected) await jira.get('/rest/api/3/myself');
       const fields = await resolveFields(jira);
       if (!fields.sprint) throw new Error('Could not find the Sprint field in Jira');
       log(`Jira fields: sprint=${fields.sprint}, story points=${fields.storyPoints ?? 'not found'}`);
