@@ -3,6 +3,7 @@ import { lastSync } from '../jira/sync.js';
 
 const DAY_MS = 86400000;
 const TREND_SPRINTS = 6; // history loaded for averages and trend charts
+const MIN_BLOCK_DAYS = 1 / 24; // blocks shorter than 1 hour are ignored
 
 const round = (n, dp = 0) => (n === null || Number.isNaN(n) ? null : Number(n.toFixed(dp)));
 const pct = (num, den) => (den ? (num / den) * 100 : 0);
@@ -82,7 +83,7 @@ async function loadData(sprintIds, assigneeId) {
       [issueIds]
     ),
     query(
-      `SELECT d.* FROM defects d LEFT JOIN issues i ON i.id = d.issue_id
+      `SELECT d.*, i.issue_key FROM defects d LEFT JOIN issues i ON i.id = d.issue_id
         WHERE d.sprint_id = ANY($1) ${assigneeFilter}`,
       params
     ),
@@ -140,13 +141,16 @@ function sprintStats(sprint, data, historyByIssue) {
       const overlap = Math.min(bEnd, end) - Math.max(b.started_at, start);
       return { ...b, overlapDays: overlap / DAY_MS, lengthDays: (bEnd - b.started_at) / DAY_MS };
     })
-    .filter((b) => b.overlapDays > 0);
+    // Ignore flags set and cleared within an hour: not a real blocker
+    .filter((b) => b.overlapDays > 0 && b.lengthDays >= MIN_BLOCK_DAYS);
   const blockedIssues = new Set(blockedPeriods.map((b) => b.issue_id));
   const externalIssues = new Set(blockedPeriods.filter((b) => b.external).map((b) => b.issue_id));
 
   // Quality
   const defects = data.defects.filter((d) => d.sprint_id === sprint.id);
-  const closed = defects.filter((d) => d.closed_at && d.closed_at <= end).length;
+  const closedDefects = defects.filter((d) => d.closed_at && d.closed_at <= end);
+  const closed = closedDefects.length;
+  const defectRef = (d) => ({ key: d.issue_key, title: d.title });
   const uat = defects.filter((d) => d.found_in === 'uat').length;
   const prod = defects.filter((d) => d.found_in === 'prod').length;
 
@@ -198,6 +202,8 @@ function sprintStats(sprint, data, historyByIssue) {
     },
     defects: {
       created: defects.length,
+      createdList: defects.map(defectRef),
+      closedList: closedDefects.map(defectRef),
       closed,
       open: defects.length - closed,
       uatPct: round(pct(uat, defects.length)),
@@ -343,6 +349,8 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
       team: { id: team.id, name: team.name, wipLimit: team.wip_limit },
       sprint: { id: sprint.id, name: sprint.name, goal: sprint.goal, startDate: sprint.start_date, endDate: sprint.end_date, completedAt: sprint.completed_at, release: sprint.release_name, status: sprint.status },
       generatedAt: new Date().toISOString(),
+      // Used to link Jira issue numbers on the dashboard
+      jiraBaseUrl: process.env.JIRA_BASE_URL?.replace(/\/$/, '') || null,
       sync: await lastSync(),
     },
     summary,
@@ -378,6 +386,8 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
         sprint: s.name,
         created: s.defects.created,
         closed: s.defects.closed,
+        createdList: s.defects.createdList,
+        closedList: s.defects.closedList,
         open: s.defects.open,
         createdInSprint: s.defects.createdInSprint,
         stories: s.defects.stories,
