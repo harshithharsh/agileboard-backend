@@ -24,7 +24,7 @@ and for each sprint its issues with their changelog. Sub-tasks and epics are ski
 | AgileBoard | From Jira |
 |---|---|
 | Committed vs added | When the issue joined the sprint (Sprint field in the changelog): after sprint start + 1h = added |
-| Completed vs spillover | Status at the moment the sprint was closed (done category = completed) |
+| Completed vs spillover | Status at the moment the sprint was closed. Done = a status in the board's **Done column** (as in Jira's sprint report) or in Jira's Done category |
 | Story points | "Story point estimate" / "Story Points" field (auto-detected, or `JIRA_STORY_POINTS_FIELD`) |
 | Status history, cycle time, WIP | Status changes in the changelog, mapped by status category and name (review / test) |
 | Blocked work | Flagged as Impediment, or a status named Blocked / On hold |

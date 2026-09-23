@@ -3,13 +3,22 @@
 
 const GRACE_MS = 60 * 60 * 1000; // issues added within 1h of sprint start still count as committed
 
-// Map a Jira status to one of AgileBoard's workflow states.
-export function mapStatus(name = '', categoryKey = 'new') {
-  if (categoryKey === 'done') return 'done';
+// Map a Jira status to one of AgileBoard's workflow states. `doneOnBoard` = the status sits in the
+// board's Done (last) column, which is what Jira's sprint report counts as completed.
+export function mapStatus(name = '', categoryKey = 'new', doneOnBoard = false) {
+  if (doneOnBoard || categoryKey === 'done') return 'done';
   if (categoryKey === 'new') return 'todo';
   if (/review/i.test(name)) return 'in_review';
   if (/test|qa|verif|uat/i.test(name)) return 'in_test';
   return 'in_progress';
+}
+
+// Status ids in the board's last column ("Done"). Jira's sprint report treats these as completed,
+// even when a status is in Jira's "In Progress" category (e.g. "Delivered to QA" on the Nexo board).
+export function doneStatusIds(boardConfig) {
+  const columns = boardConfig?.columnConfig?.columns || [];
+  const last = [...columns].reverse().find((c) => c.statuses?.length);
+  return new Set((last?.statuses || []).map((s) => String(s.id)));
 }
 
 export function mapIssueType(name = '') {
@@ -57,6 +66,7 @@ export function changelogItems(histories = []) {
 export function transformIssue(issue, histories, ctx) {
   const f = issue.fields;
   const { sprint, statusById } = ctx;
+  const doneIds = ctx.doneStatusIds ?? new Set();
   const items = changelogItems(histories);
   const sprintId = String(sprint.id);
   const sprintStart = toDate(sprint.startDate);
@@ -65,7 +75,7 @@ export function transformIssue(issue, histories, ctx) {
 
   const statusOf = (id, name) => {
     const s = statusById.get(String(id));
-    return mapStatus(s?.name ?? name, s?.category);
+    return mapStatus(s?.name ?? name, s?.category, doneIds.has(String(id)));
   };
 
   // --- status history -------------------------------------------------------
@@ -74,7 +84,7 @@ export function transformIssue(issue, histories, ctx) {
     .map((i) => ({ at: i.at, from: statusOf(i.from, i.fromString), to: statusOf(i.to, i.toString), toName: i.toString }))
     .filter((h) => h.from !== h.to);
 
-  const currentStatus = mapStatus(f.status?.name, f.status?.statusCategory?.key);
+  const currentStatus = mapStatus(f.status?.name, f.status?.statusCategory?.key, doneIds.has(String(f.status?.id)));
   const startedAt = history.find((h) => h.to !== 'todo')?.at ?? (currentStatus !== 'todo' ? created : null);
   const doneEvents = history.filter((h) => h.to === 'done');
   const completedAt = currentStatus === 'done' ? toDate(f.resolutiondate) ?? doneEvents.at(-1)?.at ?? null : null;

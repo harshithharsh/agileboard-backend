@@ -1,6 +1,6 @@
 import { pool, query } from '../config/db.js';
 import { createJiraClient } from './client.js';
-import { transformIssue, pickSprints, mapSprintState } from './transform.js';
+import { transformIssue, pickSprints, mapSprintState, doneStatusIds } from './transform.js';
 
 const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
 let running = null; // only one sync at a time
@@ -118,6 +118,8 @@ async function saveSprint(team, sprint, records) {
 
 async function syncTeam(jira, team, fields, statusById, log) {
   const all = await jira.boardSprints(team.jira_board_id);
+  // Completed = the board's Done column, like Jira's sprint report
+  const doneIds = jira.boardConfiguration ? doneStatusIds(await jira.boardConfiguration(team.jira_board_id)) : new Set();
   const sprints = pickSprints(all, team.jira_board_id, SYNC_CLOSED_SPRINTS);
   log(`${team.name} (board ${team.jira_board_id}): ${sprints.map((s) => s.name).join(', ') || 'no sprints'}`);
 
@@ -132,7 +134,7 @@ async function syncTeam(jira, team, fields, statusById, log) {
     for (const issue of issues) {
       let histories = issue.changelog?.histories || [];
       if (issue.changelog && issue.changelog.total > histories.length) histories = await jira.issueChangelog(issue.id);
-      records.push(transformIssue(issue, histories, { sprint, fields, statusById }));
+      records.push(transformIssue(issue, histories, { sprint, fields, statusById, doneStatusIds: doneIds }));
     }
     await saveSprint(team, sprint, records);
     log(`  ${sprint.name} [${sprint.state}]: ${records.length} issues`);

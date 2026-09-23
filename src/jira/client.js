@@ -54,6 +54,7 @@ export function createJiraClient(config = jiraConfig()) {
     get,
     fields: () => get('/rest/api/3/field'),
     statuses: () => get('/rest/api/3/status'),
+    boardConfiguration: (boardId) => get(`/rest/agile/1.0/board/${boardId}/configuration`),
     boardSprints: (boardId) =>
       getAllPaged(`/rest/agile/1.0/board/${boardId}/sprint`, { state: 'active,closed' }, 'values'),
     sprintIssues: (sprintId, fields) =>

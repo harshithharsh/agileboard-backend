@@ -74,3 +74,21 @@ test('pickSprints keeps active sprints and the latest closed ones from the board
     .concat({ id: 5, state: 'active', originBoardId: 9, startDate: '2026-05-01' }, { id: 6, state: 'closed', originBoardId: 7, startDate: '2026-04-15' });
   assert.deepEqual(pickSprints(sprints, 9, 2).map((s) => s.id), [3, 4, 5]);
 });
+
+test("statuses in the board's Done column count as done (e.g. Delivered to QA)", async () => {
+  const { doneStatusIds } = await import('../src/jira/transform.js');
+  const done = doneStatusIds({ columnConfig: { columns: [
+    { name: 'To Do', statuses: [{ id: '2' }] },
+    { name: 'In Progress', statuses: [{ id: '3' }] },
+    { name: 'Done', statuses: [{ id: '4' }, { id: '15' }] },
+  ] } });
+  assert.deepEqual([...done], ['4', '15']);
+  const statuses = new Map([...statusById, ['15', { name: 'Delivered to QA', category: 'indeterminate' }]]);
+  const delivered = { ...issue, fields: { ...issue.fields, status: { id: '15', name: 'Delivered to QA', statusCategory: { key: 'indeterminate' } } } };
+  const h = [...histories.slice(0, 4), { created: '2026-09-19T10:00:00.000+0000', items: [{ field: 'status', from: '3', fromString: 'In Progress', to: '15', toString: 'Delivered to QA' }] }];
+  const r = transformIssue(delivered, h, { sprint: sprint1, fields, statusById: statuses, doneStatusIds: done });
+  assert.equal(r.status, 'done');
+  assert.equal(r.membership.outcome, 'completed');
+  const without = transformIssue(delivered, h, { sprint: sprint1, fields, statusById: statuses });
+  assert.equal(without.membership.outcome, 'spillover');
+});
