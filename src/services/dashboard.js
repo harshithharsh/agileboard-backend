@@ -116,6 +116,11 @@ function sprintStats(sprint, data, historyByIssue) {
   const spillover = sum(items.filter((i) => i.outcome === 'spillover'), (i) => i.points);
   const scope = committed + added;
 
+  // Business Value Delivered % = Stories Completed ÷ Stories Planned × 100
+  // Planned = stories in the sprint at start; completed = those planned stories that were done.
+  const plannedStories = items.filter((i) => i.type === 'story' && i.commitment === 'committed');
+  const completedStories = plannedStories.filter((i) => i.outcome === 'completed');
+
   // Flow
   const cycleDays = completedItems
     .filter((i) => i.started_at && i.completed_at)
@@ -161,6 +166,8 @@ function sprintStats(sprint, data, historyByIssue) {
     spillover,
     predictability: round(pct(completedCommitted, committed)),
     completion: round(pct(completed, scope)),
+    businessValue: plannedStories.length ? round(pct(completedStories.length, plannedStories.length)) : null,
+    stories: { planned: plannedStories.length, completed: completedStories.length },
     velocity: completed,
     spilloverPct: round(pct(spillover, scope)),
     unplannedPct: round(pct(added, committed)),
@@ -329,7 +336,11 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     },
     summary,
     delivery: trend.map((s, i) => ({
+      sprintId: s.id,
       sprint: s.name,
+      businessValue: s.businessValue,
+      storiesPlanned: s.stories.planned,
+      storiesCompleted: s.stories.completed,
       committed: s.committed,
       completed: s.completed,
       velocity: s.velocity,
@@ -379,3 +390,4 @@ export async function getFilters() {
     assignees: members.rows,
   };
 }
+

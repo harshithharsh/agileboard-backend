@@ -51,6 +51,7 @@ All metrics are calculated in `src/services/dashboard.js` from the raw sprint da
 | Completion | completed points ÷ (committed + added points) |
 | Velocity | completed points |
 | Spillover | spillover points ÷ (committed + added points) |
+| Business value delivered | stories completed ÷ stories planned × 100 (planned = Story issues in the sprint at start; completed = those done when it closed) |
 | Unplanned work | added points ÷ committed points |
 | Defect escape rate | defects found in UAT or Prod ÷ all defects raised in the sprint |
 | Velocity stable band | ±10% around the average of the previous sprints |
