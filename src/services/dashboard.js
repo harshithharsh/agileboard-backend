@@ -433,6 +433,8 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
         sprintsInAverage: trend.length,
       },
       wip: { ...cur.wip, limit: team.wip_limit },
+      // Cycle time per sprint (days from first "in progress" to done, for items completed in the sprint)
+      cycleTimeTrend: trend.map((s) => ({ sprint: s.name, ...s.cycleTime, items: s.throughput })),
       blocked: cur.blocked,
     },
     scope: trend.map((s) => ({ sprint: s.name, completed: s.completed, added: s.added, spillover: s.spillover })),
