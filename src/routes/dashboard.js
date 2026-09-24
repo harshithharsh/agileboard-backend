@@ -12,15 +12,17 @@ router.get('/filters', async (req, res, next) => {
 });
 
 // Full dashboard for one team and sprint.
-// Query: teamId (required), sprintId (default: latest), assigneeId, range (1–6 sprints for trend charts)
+// Query: teamId (required), quarter (e.g. 2026-Q3: trend charts show that quarter's sprints),
+// sprintId (default: latest, within the quarter if given), assigneeId
 router.get('/dashboard', async (req, res, next) => {
-  const { teamId, sprintId, assigneeId, range } = req.query;
+  const { teamId, sprintId, assigneeId, quarter } = req.query;
+  if (quarter && !/^\d{4}-Q[1-4]$/.test(quarter)) return res.status(400).json({ error: 'quarter must look like 2026-Q3' });
   if (!UUID.test(teamId || '')) return res.status(400).json({ error: 'teamId is required' });
   for (const [name, value] of Object.entries({ sprintId, assigneeId })) {
     if (value && !UUID.test(value)) return res.status(400).json({ error: `${name} is not a valid id` });
   }
   try {
-    const data = await getDashboard({ teamId, sprintId, assigneeId, range: range ? Number(range) : undefined });
+    const data = await getDashboard({ teamId, sprintId, assigneeId, quarter });
     if (!data) return res.status(404).json({ error: 'No sprints found for this team' });
     res.json(data);
   } catch (err) { next(err); }

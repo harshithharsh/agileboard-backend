@@ -2,7 +2,8 @@ import { query } from '../config/db.js';
 import { lastSync } from '../jira/sync.js';
 
 const DAY_MS = 86400000;
-const TREND_SPRINTS = 6; // history loaded for averages and trend charts
+const TREND_SPRINTS = 6; // sprints in the trend charts when no quarter is chosen; also the velocity-band history
+const MAX_HISTORY = 20; // sprints loaded before the selected one
 const MIN_BLOCK_DAYS = 1 / 24; // blocks shorter than 1 hour are ignored
 
 const round = (n, dp = 0) => (n === null || Number.isNaN(n) ? null : Number(n.toFixed(dp)));
@@ -41,8 +42,12 @@ function meetsTarget(value, target) {
 // Data loading
 // ---------------------------------------------------------------------------
 
-// Returns the selected sprint plus the ones before it (up to TREND_SPRINTS) for one team.
-async function loadSprintWindow(teamId, sprintId) {
+// Calendar quarter a date falls in: '2026-07-01' -> '2026-Q3'
+export const quarterOf = (date) => `${date.slice(0, 4)}-Q${Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1}`;
+
+// Returns the selected sprint plus the ones before it for one team. With a quarter, the selected sprint
+// defaults to the latest one that started in that quarter.
+async function loadSprintWindow(teamId, sprintId, quarter) {
   const { rows: all } = await query(
     `SELECT s.*, r.name AS release_name
        FROM sprints s LEFT JOIN releases r ON r.id = s.release_id
@@ -51,9 +56,11 @@ async function loadSprintWindow(teamId, sprintId) {
     [teamId]
   );
   if (!all.length) return [];
-  const idx = sprintId ? all.findIndex((s) => s.id === sprintId) : all.length - 1;
-  if (idx === -1) return [];
-  return all.slice(Math.max(0, idx - TREND_SPRINTS + 1), idx + 1);
+  const candidates = quarter ? all.filter((s) => quarterOf(s.start_date) === quarter) : all;
+  const selected = sprintId ? candidates.find((s) => s.id === sprintId) : candidates.at(-1);
+  if (!selected) return [];
+  const idx = all.indexOf(selected);
+  return all.slice(Math.max(0, idx - MAX_HISTORY + 1), idx + 1);
 }
 
 async function loadData(sprintIds, assigneeId) {
@@ -250,8 +257,9 @@ function burndown(sprint, stats) {
 // Dashboard assembly
 // ---------------------------------------------------------------------------
 
-export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND_SPRINTS }) {
-  const window = await loadSprintWindow(teamId, sprintId);
+// quarter ('2026-Q3') limits the trend charts to sprints that started in that quarter.
+export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
+  const window = await loadSprintWindow(teamId, sprintId, quarter);
   if (!window.length) return null;
 
   const [{ rows: teamRows }, data] = await Promise.all([
@@ -277,7 +285,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
   const sprint = window[window.length - 1];
 
   // Velocity "stable band": ±10% around the average of previous sprints (none for a team's first sprint)
-  const prevVelocities = stats.slice(0, -1).map((s) => s.velocity);
+  const prevVelocities = stats.slice(-TREND_SPRINTS, -1).map((s) => s.velocity);
   const velocityAvg = prevVelocities.length ? sum(prevVelocities, (v) => v) / prevVelocities.length : null;
   const velocityBand = velocityAvg === null ? null : { low: Math.round(velocityAvg * 0.9), high: Math.round(velocityAvg * 1.1) };
 
@@ -334,20 +342,22 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
     ? 'in_progress'
     : attentionCount === 0 ? 'on_track' : attentionCount === 1 ? 'attention' : 'at_risk';
 
-  const trend = stats.slice(-Math.max(1, Number(range) || TREND_SPRINTS));
+  // Trend charts: the chosen quarter's sprints (up to the selected one), otherwise the last few sprints
+  const trend = quarter ? stats.filter((s) => quarterOf(s.startDate) === quarter) : stats.slice(-TREND_SPRINTS);
   const rolling = (i) => {
     const slice = stats.slice(Math.max(0, i - 2), i + 1);
     return round(sum(slice, (s) => s.velocity) / slice.length, 1);
   };
   const offset = stats.length - trend.length;
 
-  const previousThroughputs = stats.slice(0, -1).map((s) => s.throughput);
+  const previousThroughputs = trend.slice(0, -1).map((s) => s.throughput);
 
   return {
     context: {
       project: { id: team.project_id, name: team.project_name },
       team: { id: team.id, name: team.name, wipLimit: team.wip_limit },
       sprint: { id: sprint.id, name: sprint.name, goal: sprint.goal, startDate: sprint.start_date, endDate: sprint.end_date, completedAt: sprint.completed_at, release: sprint.release_name, status: sprint.status },
+      quarter: quarter || null,
       generatedAt: new Date().toISOString(),
       // Used to link Jira issue numbers on the dashboard
       jiraBaseUrl: process.env.JIRA_BASE_URL?.replace(/\/$/, '') || null,
@@ -372,8 +382,8 @@ export async function getDashboard({ teamId, sprintId, assigneeId, range = TREND
       throughput: {
         current: cur.throughput,
         previous: prev?.throughput ?? null,
-        average: previousThroughputs.length ? round(sum(stats, (s) => s.throughput) / stats.length) : null,
-        sprintsInAverage: stats.length,
+        average: previousThroughputs.length ? round(sum(trend, (s) => s.throughput) / trend.length) : null,
+        sprintsInAverage: trend.length,
       },
       wip: { ...cur.wip, limit: team.wip_limit },
       blocked: cur.blocked,

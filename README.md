@@ -18,7 +18,7 @@ Create the database first; see the `agileboard-database` repo.
 3. Run `npm run sync`, or click **Refresh** on the dashboard (calls `POST /api/sync`).
 
 Each team maps to a Jira board (`teams.jira_board_id`): Nexo → 524, Vertex → 12, Nexus → 826.
-For every board the sync pulls the active sprint(s) plus the last `JIRA_SYNC_CLOSED_SPRINTS` (default 6) closed sprints,
+For every board the sync pulls the active sprint(s), every closed sprint since `JIRA_SYNC_SINCE` (default 1 January of the current year) and at least the last `JIRA_SYNC_CLOSED_SPRINTS` (default 6) closed sprints,
 and for each sprint its issues with their changelog. Sub-tasks and epics are skipped.
 
 | AgileBoard | From Jira |
@@ -40,7 +40,7 @@ Tests for the Jira mapping: `npm test`.
 | GET | `/api/health` | API + DB health check |
 | GET | `/api/filters` | Options for the filter bar: projects, teams, releases, sprints, assignees |
 | GET / POST | `/api/sync` | Last sync status / run a Jira sync now |
-| GET | `/api/dashboard?teamId=&sprintId=&assigneeId=&range=` | Everything the dashboard shows for one team and sprint. `sprintId` defaults to the latest sprint; `range` (1–6) sets how many sprints the trend charts include |
+| GET | `/api/dashboard?teamId=&quarter=&sprintId=&assigneeId=` | Everything the dashboard shows for one team and sprint. `quarter` (e.g. `2026-Q3`) limits the trend charts to sprints that started in that quarter; `sprintId` defaults to the latest sprint (in the quarter) |
 
 ## How metrics are calculated
 All metrics are calculated in `src/services/dashboard.js` from the raw sprint data.

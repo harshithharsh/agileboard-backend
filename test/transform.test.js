@@ -92,3 +92,9 @@ test("statuses in the board's Done column count as done (e.g. Delivered to QA)",
   const without = transformIssue(delivered, h, { sprint: sprint1, fields, statusById: statuses });
   assert.equal(without.membership.outcome, 'spillover');
 });
+
+test('pickSprints also keeps every closed sprint since a date', () => {
+  const sprints = [1, 2, 3, 4, 5].map((n) => ({ id: n, state: 'closed', originBoardId: 9, startDate: `2026-0${n}-10T00:00:00Z` }));
+  assert.deepEqual(pickSprints(sprints, 9, 1, '2026-03-01').map((s) => s.id), [3, 4, 5]);
+  assert.deepEqual(pickSprints(sprints, 9, 2, null).map((s) => s.id), [4, 5]);
+});

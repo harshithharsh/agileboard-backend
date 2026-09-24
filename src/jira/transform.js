@@ -168,11 +168,14 @@ export function transformIssue(issue, histories, ctx) {
   };
 }
 
-// Which sprints of a board to sync: every active one plus the latest `closedCount` closed ones.
-export function pickSprints(sprints, boardId, closedCount) {
+// Which sprints of a board to sync: every active one, every closed one that started on or after `since`
+// (YYYY-MM-DD), and at least the latest `closedCount` closed ones.
+export function pickSprints(sprints, boardId, closedCount, since = null) {
   const own = sprints.filter((s) => !s.originBoardId || s.originBoardId === Number(boardId));
   const byStart = (a, b) => new Date(a.startDate || 0) - new Date(b.startDate || 0);
-  const closed = own.filter((s) => s.state === 'closed').sort(byStart).slice(-closedCount);
+  const allClosed = own.filter((s) => s.state === 'closed').sort(byStart);
+  const latest = new Set(allClosed.slice(-closedCount));
+  const closed = allClosed.filter((s) => latest.has(s) || (since && (s.startDate || '').slice(0, 10) >= since));
   const active = own.filter((s) => s.state === 'active').sort(byStart);
   return [...closed, ...active];
 }

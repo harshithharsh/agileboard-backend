@@ -3,6 +3,8 @@ import { createJiraClient } from './client.js';
 import { transformIssue, pickSprints, mapSprintState, doneStatusIds } from './transform.js';
 
 const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
+// Sync every sprint that started since this date (default: 1 January of the current year), for the quarter filter
+const SYNC_SINCE = process.env.JIRA_SYNC_SINCE || `${new Date().getFullYear()}-01-01`;
 let running = null; // only one sync at a time
 
 // Find the custom field ids for Sprint and Story Points (they differ between Jira sites).
@@ -120,7 +122,7 @@ async function syncTeam(jira, team, fields, statusById, log) {
   const all = await jira.boardSprints(team.jira_board_id);
   // Completed = the board's Done column, like Jira's sprint report
   const doneIds = jira.boardConfiguration ? doneStatusIds(await jira.boardConfiguration(team.jira_board_id)) : new Set();
-  const sprints = pickSprints(all, team.jira_board_id, SYNC_CLOSED_SPRINTS);
+  const sprints = pickSprints(all, team.jira_board_id, SYNC_CLOSED_SPRINTS, SYNC_SINCE);
   log(`${team.name} (board ${team.jira_board_id}): ${sprints.map((s) => s.name).join(', ') || 'no sprints'}`);
 
   const requestFields = ['summary', 'status', 'issuetype', 'assignee', 'created', 'resolutiondate', 'labels',
