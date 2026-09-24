@@ -300,7 +300,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
 
   // While a sprint is running, outcome metrics (completion etc.) can't be judged yet
   const isActive = sprint.status === 'active';
-  const OUTCOME_METRICS = ['predictability', 'completion', 'velocity', 'spillover'];
+  const OUTCOME_METRICS = ['predictability', 'velocity', 'spillover'];
   const pending = (key) => isActive && OUTCOME_METRICS.includes(key);
 
   const targetLabel = (t) => (t ? `${t.operator === '>=' ? '≥' : '≤'} ${t.value}${t.metric === 'blocked_items' ? '' : '%'}` : '');
@@ -362,7 +362,6 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
   const summary = [
     timeElapsedCard,
     card('predictability', 'Sprint Predictability', cur.predictability, prev?.predictability ?? null, '%', targets.predictability),
-    card('completion', 'Sprint Completion', cur.completion, prev?.completion ?? null, '%', targets.completion),
     card('velocity', 'Velocity', cur.velocity, prev?.velocity ?? null, 'SP', null),
     card('spillover', 'Spillover', cur.spilloverPct, prev?.spilloverPct ?? null, '%', targets.spillover),
     card('unplanned', 'Unplanned Work', cur.unplannedPct, prev?.unplannedPct ?? null, '%', targets.unplanned),
@@ -380,7 +379,6 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
   });
   const health = [
     healthRow('predictability', 'Sprint Predictability', cur.predictability, '%', targets.predictability),
-    healthRow('completion', 'Completion Rate', cur.completion, '%', targets.completion),
     healthRow('spillover', 'Spillover', cur.spilloverPct, '%', targets.spillover),
     healthRow('unplanned', 'Unplanned Work', cur.unplannedPct, '%', targets.unplanned),
     healthRow('blocked_items', 'Blocked Work', cur.blocked.items, '', targets.blocked_items),
