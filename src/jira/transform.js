@@ -143,6 +143,7 @@ export function transformIssue(issue, histories, ctx) {
     points,
     status: currentStatus,
     jiraStatus: f.status?.name ?? null,
+    priority: f.priority?.name ?? null,
     startedAt,
     completedAt,
     createdAt: created,

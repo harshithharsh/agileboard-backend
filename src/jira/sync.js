@@ -73,16 +73,16 @@ async function saveSprint(team, sprint, records) {
       const assigneeId = await upsertUser(client, r.assignee, team.id);
       const { rows: [issue] } = await client.query(
         `INSERT INTO issues (project_id, issue_key, title, type, story_points, assignee_id, status, jira_status,
-                             started_at, completed_at, dod_met, has_acceptance_criteria, created_at, jira_issue_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                             started_at, completed_at, dod_met, has_acceptance_criteria, created_at, jira_issue_id, priority)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          ON CONFLICT (jira_issue_id) DO UPDATE SET
            issue_key = EXCLUDED.issue_key, title = EXCLUDED.title, type = EXCLUDED.type, story_points = EXCLUDED.story_points,
            assignee_id = EXCLUDED.assignee_id, status = EXCLUDED.status, jira_status = EXCLUDED.jira_status,
            started_at = EXCLUDED.started_at, completed_at = EXCLUDED.completed_at, dod_met = EXCLUDED.dod_met,
-           has_acceptance_criteria = EXCLUDED.has_acceptance_criteria
+           has_acceptance_criteria = EXCLUDED.has_acceptance_criteria, priority = EXCLUDED.priority
          RETURNING id`,
         [team.project_id, r.key, r.title, r.type, r.points, assigneeId, r.status, r.jiraStatus,
-          r.startedAt, r.completedAt, r.compliance.dod, r.compliance.acceptanceCriteria, r.createdAt, r.jiraId]
+          r.startedAt, r.completedAt, r.compliance.dod, r.compliance.acceptanceCriteria, r.createdAt, r.jiraId, r.priority]
       );
 
       await client.query(

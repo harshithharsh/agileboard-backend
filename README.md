@@ -60,6 +60,8 @@ All metrics are calculated in `src/services/dashboard.js` from the raw sprint da
 | WIP | items in progress / review / test at sprint end (from status history) |
 | Blocked work | issues blocked during the sprint (blocks shorter than 1 hour are ignored); blocked time is the overlap with the sprint |
 | Burndown | scope added so far − points completed, per working day |
+| Time elapsed | working days passed ÷ working days in the sprint (100% once closed) |
+| P1 - Blocker | issues with Jira priority "P1 - Blocker" still open at sprint end (or now, while active); target 0 |
 | Sprint state | On track (all health metrics meet target), Attention (1 miss), At risk (2+ misses) |
 
 A closed sprint is measured up to the moment it was closed in Jira, which can be after its planned end date.

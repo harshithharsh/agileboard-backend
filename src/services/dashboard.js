@@ -69,7 +69,7 @@ async function loadData(sprintIds, assigneeId) {
 
   const { rows: items } = await query(
     `SELECT si.sprint_id, si.commitment, si.outcome, si.points, si.added_at,
-            i.id AS issue_id, i.issue_key, i.title, i.type, i.started_at, i.completed_at,
+            i.id AS issue_id, i.issue_key, i.title, i.type, i.priority, i.started_at, i.completed_at,
             i.dor_met, i.dod_met, i.has_acceptance_criteria, i.code_reviewed, i.tests_complete, i.automated
        FROM sprint_issues si
        JOIN issues i ON i.id = si.issue_id
@@ -168,6 +168,10 @@ function sprintStats(sprint, data, historyByIssue) {
   const storyCount = items.filter((i) => i.type === 'story').length;
   const perBugCreated = (n) => (createdInSprint ? round(n / createdInSprint, 1) : null);
 
+  // P1 - Blocker issues in the sprint, and which were still open at sprint end (or now, while active)
+  const p1 = items.filter((i) => /^p1\b|blocker/i.test(i.priority || ''));
+  const p1Open = p1.filter((i) => statusAtEnd[items.indexOf(i)] !== 'done');
+
   const share = (list, key) => {
     const tracked = list.filter((i) => i[key] !== null && i[key] !== undefined);
     return tracked.length ? round(pct(tracked.filter((i) => i[key]).length, tracked.length)) : null;
@@ -198,6 +202,11 @@ function sprintStats(sprint, data, historyByIssue) {
       p85: round(percentile(cycleDays, 0.85), 1),
     },
     wip: { current: wip, inReview, inTest },
+    p1Blockers: {
+      total: p1.length,
+      open: p1Open.length,
+      openList: p1Open.map((i) => ({ key: i.issue_key, title: i.title })),
+    },
     blocked: {
       items: blockedIssues.size,
       totalDays: round(sum(blockedPeriods, (b) => b.overlapDays), 1),
@@ -312,12 +321,52 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
     higherIsBetter: !target || target.operator === '>=',
   });
 
+  // Time elapsed: working days passed ÷ working days in the sprint (100% once it has closed)
+  const sprintDays = workingDays(sprint.start_date, sprint.end_date);
+  const today = new Date();
+  const daysElapsed = sprint.status === 'completed' ? sprintDays.length : sprintDays.filter((d) => d <= today).length;
+  const elapsedPct = sprintDays.length ? round(pct(daysElapsed, sprintDays.length)) : null;
+  const shortDate = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).replace('Sept', 'Sep');
+
+  const timeElapsedCard = {
+    key: 'time_elapsed',
+    label: 'Time Elapsed',
+    value: elapsedPct,
+    unit: '%',
+    prior: null,
+    delta: null,
+    caption: sprint.status === 'completed' ? 'Sprint closed' : `Day ${daysElapsed} of ${sprintDays.length}`,
+    footLeft: `${shortDate(sprint.start_date)} – ${shortDate(sprint.end_date)}`,
+    footRight: `${sprintDays.length} working days`,
+    barPct: elapsedPct,
+    status: sprint.status === 'completed' ? 'on_track' : 'in_progress',
+    higherIsBetter: true,
+  };
+
+  const p1Now = cur.p1Blockers;
+  const p1Card = {
+    key: 'p1_blockers',
+    label: 'P1 - Blocker',
+    value: p1Now.open,
+    unit: '',
+    prior: prev ? prev.p1Blockers.open : null,
+    delta: prev ? p1Now.open - prev.p1Blockers.open : null,
+    footLeft: 'Target 0 open',
+    footRight: `${p1Now.total} in sprint`,
+    barPct: p1Now.total ? round(pct(p1Now.open, p1Now.total)) : 0,
+    status: p1Now.open > 0 ? 'attention' : 'on_track',
+    higherIsBetter: false,
+    issues: p1Now.openList,
+  };
+
   const summary = [
+    timeElapsedCard,
     card('predictability', 'Sprint Predictability', cur.predictability, prev?.predictability ?? null, '%', targets.predictability),
     card('completion', 'Sprint Completion', cur.completion, prev?.completion ?? null, '%', targets.completion),
     card('velocity', 'Velocity', cur.velocity, prev?.velocity ?? null, 'SP', null),
     card('spillover', 'Spillover', cur.spilloverPct, prev?.spilloverPct ?? null, '%', targets.spillover),
     card('unplanned', 'Unplanned Work', cur.unplannedPct, prev?.unplannedPct ?? null, '%', targets.unplanned),
+    p1Card,
   ];
 
   const healthRow = (key, label, value, unit, target) => ({
