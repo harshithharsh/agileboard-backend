@@ -28,6 +28,13 @@ export function mapIssueType(name = '') {
   return 'task';
 }
 
+// Calendar date of a Jira timestamp in the given timezone ('2026-09-28T18:30:00Z' in Asia/Kolkata -> '2026-09-29').
+// Jira stores sprint dates in UTC; the date people see in Jira depends on their timezone.
+export function localDate(iso, timeZone = 'UTC') {
+  if (!iso) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+}
+
 export function mapSprintState(state) {
   return state === 'active' ? 'active' : state === 'closed' ? 'completed' : 'planned';
 }

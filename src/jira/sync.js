@@ -1,6 +1,6 @@
 import { pool, query } from '../config/db.js';
 import { createJiraClient } from './client.js';
-import { transformIssue, pickSprints, mapSprintState, doneStatusIds } from './transform.js';
+import { transformIssue, pickSprints, mapSprintState, doneStatusIds, localDate } from './transform.js';
 
 const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
 // Sync every sprint that started since this date (default: 1 January of the current year), for the quarter filter
@@ -40,7 +40,7 @@ async function upsertRelease(client, projectId, version) {
 }
 
 // Write one sprint and all of its issues in a single transaction.
-async function saveSprint(team, sprint, records) {
+async function saveSprint(team, sprint, records, timeZone) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -53,7 +53,8 @@ async function saveSprint(team, sprint, records) {
       ? await upsertRelease(client, team.project_id, records.flatMap((r) => r.fixVersions).find((v) => v.name === topVersion[0]))
       : null;
 
-    const day = (v) => (v ? v.slice(0, 10) : null);
+    // Sprint dates as shown in Jira for the configured timezone
+    const day = (v) => localDate(v, timeZone);
     const { rows: [saved] } = await client.query(
       `INSERT INTO sprints (team_id, release_id, name, goal, start_date, end_date, started_at, completed_at, status, jira_sprint_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -118,7 +119,7 @@ async function saveSprint(team, sprint, records) {
   }
 }
 
-async function syncTeam(jira, team, fields, statusById, log) {
+async function syncTeam(jira, team, fields, statusById, log, timeZone) {
   const all = await jira.boardSprints(team.jira_board_id);
   // Completed = the board's Done column, like Jira's sprint report
   const doneIds = jira.boardConfiguration ? doneStatusIds(await jira.boardConfiguration(team.jira_board_id)) : new Set();
@@ -138,7 +139,7 @@ async function syncTeam(jira, team, fields, statusById, log) {
       if (issue.changelog && issue.changelog.total > histories.length) histories = await jira.issueChangelog(issue.id);
       records.push(transformIssue(issue, histories, { sprint, fields, statusById, doneStatusIds: doneIds }));
     }
-    await saveSprint(team, sprint, records);
+    await saveSprint(team, sprint, records, timeZone);
     log(`  ${sprint.name} [${sprint.state}]: ${records.length} issues`);
   }
   return sprints.length;
@@ -152,7 +153,10 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
     try {
       const jira = injected ?? createJiraClient();
       // Check the login first: without it Jira still answers some calls, which hides the real problem
-      if (!injected) await jira.get('/rest/api/3/myself');
+      const me = injected ? null : await jira.get('/rest/api/3/myself');
+      // Sprint dates use JIRA_TIMEZONE if set, otherwise the timezone of the Jira account used for syncing
+      const timeZone = process.env.JIRA_TIMEZONE || me?.timeZone || 'UTC';
+      log(`Sprint dates in timezone: ${timeZone}`);
       const fields = await resolveFields(jira);
       if (!fields.sprint) throw new Error('Could not find the Sprint field in Jira');
       log(`Jira fields: sprint=${fields.sprint}, story points=${fields.storyPoints ?? 'not found'}`);
@@ -161,7 +165,7 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
 
       const { rows: teams } = await query('SELECT * FROM teams WHERE jira_board_id IS NOT NULL ORDER BY name');
       let sprintCount = 0;
-      for (const team of teams) sprintCount += await syncTeam(jira, team, fields, statusById, log);
+      for (const team of teams) sprintCount += await syncTeam(jira, team, fields, statusById, log, timeZone);
 
       const message = `Synced ${sprintCount} sprints for ${teams.length} teams`;
       await query(`UPDATE sync_runs SET status = 'success', finished_at = now(), message = $2 WHERE id = $1`, [run.id, message]);

@@ -98,3 +98,12 @@ test('pickSprints also keeps every closed sprint since a date', () => {
   assert.deepEqual(pickSprints(sprints, 9, 1, '2026-03-01').map((s) => s.id), [3, 4, 5]);
   assert.deepEqual(pickSprints(sprints, 9, 2, null).map((s) => s.id), [4, 5]);
 });
+
+test('localDate converts Jira UTC timestamps to the calendar date in a timezone', async () => {
+  const { localDate } = await import('../src/jira/transform.js');
+  assert.equal(localDate('2026-09-28T18:30:00.000Z', 'Asia/Kolkata'), '2026-09-29');
+  assert.equal(localDate('2026-10-05T22:30:00.000Z', 'Asia/Kolkata'), '2026-10-06');
+  assert.equal(localDate('2026-09-01T11:49:53.000Z', 'Asia/Kolkata'), '2026-09-01');
+  assert.equal(localDate('2026-09-28T18:30:00.000Z', 'UTC'), '2026-09-28');
+  assert.equal(localDate(null), null);
+});

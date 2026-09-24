@@ -17,6 +17,8 @@ Create the database first; see the `agileboard-database` repo.
 2. In `.env`, set `JIRA_BASE_URL`, `JIRA_EMAIL` (your Atlassian login) and `JIRA_API_TOKEN`. Never commit `.env`.
 3. Run `npm run sync`, or click **Refresh** on the dashboard (calls `POST /api/sync`).
 
+Sprint start and end dates are converted from Jira's UTC timestamps to `JIRA_TIMEZONE` (default: the syncing Jira account's timezone), so they match the dates shown in Jira.
+
 Each team maps to a Jira board (`teams.jira_board_id`): Nexo → 524, Vertex → 12, Nexus → 826.
 For every board the sync pulls the active sprint(s), every closed sprint since `JIRA_SYNC_SINCE` (default 1 January of the current year) and at least the last `JIRA_SYNC_CLOSED_SPRINTS` (default 6) closed sprints,
 and for each sprint its issues with their changelog. Sub-tasks and epics are skipped.
