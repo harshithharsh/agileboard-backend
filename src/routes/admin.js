@@ -1,14 +1,11 @@
 import { Router } from 'express';
 import { pool, query } from '../config/db.js';
-import { encrypt, decrypt } from '../lib/crypto.js';
-import { createJiraClient } from '../jira/client.js';
 
-// Admin API: API keys, users & role assignment, roles, projects & teams.
+// Admin API: users & role assignment, roles, projects & teams.
 // Note: there is no login yet, so these endpoints are not access-controlled.
 
 const router = Router();
 const UUID = /^[0-9a-f-]{36}$/i;
-const INTEGRATIONS = ['jira', 'azure_devops', 'redmine', 'other'];
 const PERMISSIONS = ['view', 'create', 'edit', 'delete', 'admin'];
 const STATUSES = ['active', 'inactive'];
 
@@ -40,9 +37,7 @@ const handle = (fn) => async (req, res, next) => {
 // ---------------------------------------------------------------------------
 
 router.get('/admin', handle(async (req, res) => {
-  const [apiKeys, users, roles, projects] = await Promise.all([
-    query(`SELECT id, name, integration, base_url, account_email, secret_last4, status, last_used_at, updated_at
-             FROM api_keys ORDER BY created_at`),
+  const [users, roles, projects] = await Promise.all([
     query(`SELECT u.id, u.name, u.email, u.status, u.role_id, r.name AS role,
                   (u.jira_account_id IS NOT NULL) AS from_jira,
                   COALESCE(array_agg(p.id ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '{}') AS project_ids,
@@ -65,82 +60,11 @@ router.get('/admin', handle(async (req, res) => {
              FROM projects p ORDER BY p.name`),
   ]);
   res.json({
-    apiKeys: apiKeys.rows.map(({ secret_last4, ...k }) => ({ ...k, masked: `••••••••${secret_last4}` })),
     users: users.rows,
     roles: roles.rows,
     projects: projects.rows,
     permissions: PERMISSIONS,
   });
-}));
-
-// ---------------------------------------------------------------------------
-// API keys (secret is encrypted; only the last 4 characters are ever returned)
-// ---------------------------------------------------------------------------
-
-function apiKeyInput(body, { requireSecret }) {
-  const integration = oneOf(body.integration, INTEGRATIONS, 'Integration');
-  const k = {
-    name: text(body.name, 'Name', { required: true, max: 80 }),
-    integration,
-    baseUrl: text(body.baseUrl, 'Base URL', { required: integration === 'jira', max: 500 }),
-    accountEmail: text(body.accountEmail, 'Account email', { required: integration === 'jira' }),
-    secret: text(body.secret, 'Key / token', { required: requireSecret, max: 4000 }),
-    status: oneOf(body.status || 'active', STATUSES, 'Status'),
-  };
-  if (k.baseUrl && !/^https:\/\/[^\s/]+/i.test(k.baseUrl)) fail('Base URL must start with https://');
-  isEmail(k.accountEmail);
-  return k;
-}
-
-router.post('/admin/api-keys', handle(async (req, res) => {
-  const k = apiKeyInput(req.body ?? {}, { requireSecret: true });
-  const { rows } = await query(
-    `INSERT INTO api_keys (name, integration, base_url, account_email, secret_encrypted, secret_last4, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-    [k.name, k.integration, k.baseUrl, k.accountEmail, encrypt(k.secret), k.secret.slice(-4), k.status]
-  );
-  res.status(201).json({ id: rows[0].id });
-}));
-
-// Leave `secret` empty to keep the stored key
-router.put('/admin/api-keys/:id', handle(async (req, res) => {
-  const k = apiKeyInput(req.body ?? {}, { requireSecret: false });
-  const secretSql = k.secret ? ', secret_encrypted = $8, secret_last4 = $9' : '';
-  const params = [req.params.id, k.name, k.integration, k.baseUrl, k.accountEmail, k.status, new Date()];
-  if (k.secret) params.push(encrypt(k.secret), k.secret.slice(-4));
-  const { rowCount } = await query(
-    `UPDATE api_keys SET name = $2, integration = $3, base_url = $4, account_email = $5, status = $6, updated_at = $7${secretSql}
-      WHERE id = $1`,
-    params
-  );
-  if (!rowCount) return res.status(404).json({ error: 'API key not found' });
-  res.json({ ok: true });
-}));
-
-router.delete('/admin/api-keys/:id', handle(async (req, res) => {
-  const { rowCount } = await query('DELETE FROM api_keys WHERE id = $1', [req.params.id]);
-  if (!rowCount) return res.status(404).json({ error: 'API key not found' });
-  res.status(204).end();
-}));
-
-// Check that a Jira key works (calls Jira's "who am I")
-router.post('/admin/api-keys/:id/test', handle(async (req, res) => {
-  const { rows } = await query('SELECT * FROM api_keys WHERE id = $1', [req.params.id]);
-  const k = rows[0];
-  if (!k) return res.status(404).json({ error: 'API key not found' });
-  if (k.integration !== 'jira') return res.json({ ok: false, message: 'Connection test is available for Jira keys only' });
-  try {
-    const jira = createJiraClient({ baseUrl: k.base_url.replace(/\/$/, ''), email: k.account_email, token: decrypt(k.secret_encrypted) });
-    const me = await jira.get('/rest/api/3/myself');
-    res.json({ ok: true, message: `Connected as ${me.displayName}` });
-  } catch (err) {
-    const reason = err.cause?.code
-      ? `Cannot reach ${k.base_url} (${err.cause.code})`
-      : /Jira 401/.test(err.message) ? 'Jira rejected the login: check the account email and token'
-      : /Jira 403/.test(err.message) ? 'The token works but lacks permission to read Jira'
-      : err.message.slice(0, 200);
-    res.json({ ok: false, message: reason });
-  }
 }));
 
 // ---------------------------------------------------------------------------

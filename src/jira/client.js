@@ -14,22 +14,6 @@ export function jiraConfig() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Jira credentials: the active Jira API key from Admin (newest first), otherwise .env.
-export async function resolveJiraConfig() {
-  const { query } = await import('../config/db.js');
-  const { decrypt } = await import('../lib/crypto.js');
-  const { rows } = await query(
-    `SELECT id, base_url, account_email, secret_encrypted FROM api_keys
-      WHERE integration = 'jira' AND status = 'active' AND base_url IS NOT NULL AND account_email IS NOT NULL
-      ORDER BY updated_at DESC LIMIT 1`
-  );
-  if (rows[0]) {
-    const k = rows[0];
-    return { baseUrl: k.base_url.replace(/\/$/, ''), email: k.account_email, token: decrypt(k.secret_encrypted), apiKeyId: k.id };
-  }
-  return jiraConfig();
-}
-
 export function createJiraClient(config = jiraConfig()) {
   const auth = `Basic ${Buffer.from(`${config.email}:${config.token}`).toString('base64')}`;
 

@@ -1,5 +1,5 @@
 import { pool, query } from '../config/db.js';
-import { createJiraClient, resolveJiraConfig } from './client.js';
+import { createJiraClient } from './client.js';
 import { transformIssue, pickSprints, mapSprintState, doneStatusIds, localDate } from './transform.js';
 
 const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
@@ -151,9 +151,7 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
   running = (async () => {
     const { rows: [run] } = await query(`INSERT INTO sync_runs DEFAULT VALUES RETURNING id`);
     try {
-      const config = injected ? null : await resolveJiraConfig();
-      const jira = injected ?? createJiraClient(config);
-      if (config?.apiKeyId) await query('UPDATE api_keys SET last_used_at = now() WHERE id = $1', [config.apiKeyId]);
+      const jira = injected ?? createJiraClient();
       // Check the login first: without it Jira still answers some calls, which hides the real problem
       const me = injected ? null : await jira.get('/rest/api/3/myself');
       // Sprint dates use JIRA_TIMEZONE if set, otherwise the timezone of the Jira account used for syncing
