@@ -19,7 +19,9 @@ Create the database first; see the `agileboard-database` repo.
 
 Sprint start and end dates are converted from Jira's UTC timestamps to `JIRA_TIMEZONE` (default: the syncing Jira account's timezone), so they match the dates shown in Jira.
 
-Each team maps to a Jira board (`teams.jira_board_id`): Nexo → 524, Vertex → 12, Nexus → 826.
+Each team maps to a Jira board (`teams.jira_board_id`), managed in **Admin → Project Configuration**; only active projects are synced.
+
+Jira credentials: the sync uses the most recently updated **active Jira API key from Admin** (stored AES-256-GCM encrypted with `APP_SECRET` from `.env`), and falls back to `JIRA_EMAIL` / `JIRA_API_TOKEN` in `.env`.
 For every board the sync pulls the active sprint(s), every closed sprint since `JIRA_SYNC_SINCE` (default 1 January of the current year) and at least the last `JIRA_SYNC_CLOSED_SPRINTS` (default 6) closed sprints,
 and for each sprint its issues with their changelog. Sub-tasks and epics are skipped.
 
@@ -41,6 +43,7 @@ Tests for the Jira mapping: `npm test`.
 |---|---|---|
 | GET | `/api/health` | API + DB health check |
 | GET | `/api/filters` | Options for the filter bar: projects, teams, releases, sprints, assignees |
+| GET / POST / PUT / DELETE | `/api/admin…` | Admin: API keys (`/admin/api-keys`, `…/:id/test`), users (`/admin/users`), roles (`/admin/roles`), projects & teams (`/admin/projects`). Not access-controlled yet (no login) |
 | GET / POST | `/api/sync` | Last sync status / run a Jira sync now |
 | GET | `/api/dashboard?teamId=&quarter=&sprintId=&assigneeId=` | Everything the dashboard shows for one team and sprint. `quarter` (e.g. `2026-Q3`) limits the trend charts to sprints that started in that quarter; `sprintId` defaults to the latest sprint (in the quarter) |
 

@@ -464,7 +464,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
 
 export async function getFilters() {
   const [projects, teams, releases, sprints, members] = await Promise.all([
-    query('SELECT id, key, name FROM projects ORDER BY name'),
+    query(`SELECT id, key, name FROM projects WHERE status = 'active' ORDER BY name`),
     query('SELECT id, project_id, name FROM teams ORDER BY name'),
     query('SELECT id, project_id, name FROM releases ORDER BY name'),
     query('SELECT id, team_id, release_id, name, start_date, end_date, status FROM sprints ORDER BY start_date DESC'),
