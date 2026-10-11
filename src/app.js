@@ -5,6 +5,7 @@ import dashboard from './routes/dashboard.js';
 import sync from './routes/sync.js';
 import admin from './routes/admin.js';
 import auth from './routes/auth.js';
+import preferences from './routes/preferences.js';
 import { requireAuth, requirePermission } from './auth/middleware.js';
 
 const app = express();
@@ -29,6 +30,7 @@ app.use('/api/admin', requirePermission('admin'));
 app.use('/api', dashboard);
 app.use('/api', sync);
 app.use('/api', admin);
+app.use('/api', preferences);
 
 app.use((err, req, res, next) => {
   console.error(err);
