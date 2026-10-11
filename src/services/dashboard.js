@@ -272,7 +272,8 @@ function burndown(sprint, stats) {
       day: `D${i + 1}`,
       date: d.toISOString().slice(0, 10),
       ideal: round(initial - (initial * i) / Math.max(days.length - 1, 1), 1),
-      actual: scope - done,
+      // No actual line for days that have not started yet
+      actual: d.getTime() > Date.now() ? null : scope - done,
     };
   });
 }
