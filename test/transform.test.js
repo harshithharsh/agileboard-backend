@@ -107,3 +107,11 @@ test('localDate converts Jira UTC timestamps to the calendar date in a timezone'
   assert.equal(localDate('2026-09-28T18:30:00.000Z', 'UTC'), '2026-09-28');
   assert.equal(localDate(null), null);
 });
+
+test('sub-tasks are typed as subtask', async () => {
+  const { mapIssueType } = await import('../src/jira/transform.js');
+  assert.equal(mapIssueType('Sub-task', true), 'subtask');
+  assert.equal(mapIssueType('Subtask'), 'subtask');
+  assert.equal(mapIssueType('Story'), 'story');
+  assert.equal(mapIssueType('Change Request'), 'task');
+});

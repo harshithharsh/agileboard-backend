@@ -115,7 +115,21 @@ function statusAt(historyByIssue, issueId, at) {
 function sprintStats(sprint, data, historyByIssue) {
   const start = startOfDay(sprint.start_date);
   const end = sprintEnd(sprint);
-  const items = data.items.filter((i) => i.sprint_id === sprint.id);
+  const sprintItems = data.items.filter((i) => i.sprint_id === sprint.id);
+  // Sub-tasks only appear in the Issues by Type count; every other metric uses parent-level issues
+  const items = sprintItems.filter((i) => i.type !== 'subtask');
+
+  // Issues by type: planned (in the sprint at start), added mid-sprint, completed
+  const TYPE_ROWS = [['story', 'Stories'], ['task', 'Tasks'], ['bug', 'Bugs'], ['spike', 'Spikes'], ['subtask', 'Sub-tasks']];
+  const countBy = (list) => ({
+    planned: list.filter((i) => i.commitment === 'committed').length,
+    added: list.filter((i) => i.commitment === 'added').length,
+    completed: list.filter((i) => i.outcome === 'completed').length,
+  });
+  const issueTypes = TYPE_ROWS
+    .map(([type, label]) => ({ type, label, ...countBy(sprintItems.filter((i) => i.type === type)) }))
+    .filter((r) => r.type !== 'spike' || r.planned + r.added > 0); // show Spikes only when there are any
+  const issueTypesTotal = { type: 'total', label: 'Total Issues', ...countBy(sprintItems) };
   const completedItems = items.filter((i) => i.outcome === 'completed');
 
   const committed = sum(items.filter((i) => i.commitment === 'committed'), (i) => i.points);
@@ -192,6 +206,7 @@ function sprintStats(sprint, data, historyByIssue) {
     completion: round(pct(completedCommitted, committed)),
     businessValue: sprintStories.length ? round(pct(completedStories.length, sprintStories.length)) : null,
     stories: { total: sprintStories.length, completed: completedStories.length },
+    issueTypes: { rows: issueTypes, total: issueTypesTotal },
     velocity: completed,
     spilloverPct: round(pct(spillover, scope)),
     unplannedPct: round(pct(added, committed)),
@@ -459,6 +474,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
     sprintState,
     burndown: burndown(sprint, cur),
     compliance: cur.compliance,
+    issueTypes: cur.issueTypes,
   };
 }
 

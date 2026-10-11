@@ -131,7 +131,8 @@ async function syncTeam(jira, team, fields, statusById, log, timeZone) {
 
   for (const sprint of sprints) {
     const issues = (await jira.sprintIssues(sprint.id, requestFields)).filter(
-      (i) => !i.fields.issuetype?.subtask && !/epic/i.test(i.fields.issuetype?.name || '')
+      // Epics are skipped; sub-tasks are kept for the Issues by Type count but excluded from metrics
+      (i) => !/epic/i.test(i.fields.issuetype?.name || '')
     );
     const records = [];
     for (const issue of issues) {

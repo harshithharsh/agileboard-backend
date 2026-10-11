@@ -21,7 +21,8 @@ export function doneStatusIds(boardConfig) {
   return new Set((last?.statuses || []).map((s) => String(s.id)));
 }
 
-export function mapIssueType(name = '') {
+export function mapIssueType(name = '', isSubtask = false) {
+  if (isSubtask || /sub-?task/i.test(name)) return 'subtask';
   if (/bug|defect/i.test(name)) return 'bug';
   if (/story/i.test(name)) return 'story';
   if (/spike|research/i.test(name)) return 'spike';
@@ -139,7 +140,7 @@ export function transformIssue(issue, histories, ctx) {
   const external = /external|vendor|dependency|client/i.test((f.labels || []).join(' '));
 
   const points = Number(f[ctx.fields.storyPoints]) || 0;
-  const type = mapIssueType(f.issuetype?.name);
+  const type = mapIssueType(f.issuetype?.name, f.issuetype?.subtask);
   const description = f.description ? JSON.stringify(f.description) : '';
 
   return {
