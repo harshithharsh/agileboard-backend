@@ -3,6 +3,7 @@ import { pool, query } from '../config/db.js';
 import { hashPassword, MIN_PASSWORD_LENGTH } from '../auth/password.js';
 import { readCookie } from '../auth/session.js';
 import { createHash } from 'node:crypto';
+import { createJiraClient } from '../jira/client.js';
 
 // Admin API: users & role assignment, roles, projects & teams.
 // Access: signed-in users whose role has the 'admin' permission (enforced in app.js).
@@ -287,6 +288,34 @@ async function saveTeams(c, projectId, teams) {
     }
   }
 }
+
+// Jira problems (network, token) become a readable 400 instead of a 500
+const fromJira = async (fn) => {
+  try {
+    return await fn();
+  } catch (err) {
+    fail(`Could not load from Jira: ${err.cause?.code || err.message}`);
+  }
+};
+
+// Jira projects to choose from when adding a project; `added` = already in AgileMetrix
+router.get('/admin/jira/projects', handle(async (req, res) => {
+  const [jiraProjects, { rows }] = await Promise.all([
+    fromJira(() => createJiraClient().projects()),
+    query('SELECT upper(key) AS key FROM projects'),
+  ]);
+  const existing = new Set(rows.map((r) => r.key));
+  res.json(jiraProjects
+    .filter((p) => !p.archived)
+    .map((p) => ({ key: p.key, name: p.name, description: p.description || '', added: existing.has(p.key.toUpperCase()) })));
+}));
+
+// Scrum boards of a Jira project, offered as the project's teams
+router.get('/admin/jira/projects/:key/boards', handle(async (req, res) => {
+  if (!/^[A-Z][A-Z0-9_]{0,19}$/i.test(req.params.key)) fail('Invalid project key');
+  const boards = await fromJira(() => createJiraClient().projectBoards(req.params.key));
+  res.json(boards.map((b) => ({ id: b.id, name: b.name })));
+}));
 
 router.post('/admin/projects', handle(async (req, res) => {
   const p = projectInput(req.body ?? {});

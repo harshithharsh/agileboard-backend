@@ -55,6 +55,7 @@ Tests for the Jira mapping: `npm test`.
 | GET | `/api/filters` | Options for the filter bar: projects, teams, releases, sprints, assignees |
 | POST | `/api/auth/login`, `/api/auth/logout` | Sign in (username + password) / sign out |
 | GET | `/api/auth/me` | The signed-in user and their permissions |
+| GET | `/api/admin/jira/projects`, `/api/admin/jira/projects/:key/boards` | Active Jira projects (for Add Project) and a project's Scrum boards (filled in as teams) |
 | GET / POST / PUT / DELETE | `/api/admin…` | Admin (needs `admin`): users (`/admin/users`), roles (`/admin/roles`), projects & teams (`/admin/projects`) |
 | GET / POST | `/api/sync` | Last sync status / run a Jira sync now (POST needs `edit`) |
 | GET | `/api/dashboard?teamId=&quarter=&sprintId=&assigneeId=` | Everything the dashboard shows for one team and sprint. `quarter` (e.g. `2026-Q3`) limits the trend charts to sprints that started in that quarter; `sprintId` defaults to the latest sprint (in the quarter) |
