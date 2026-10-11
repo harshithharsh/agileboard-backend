@@ -8,30 +8,21 @@ import { hashPassword, MIN_PASSWORD_LENGTH } from '../src/auth/password.js';
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise((resolve) => rl.question(q, (a) => resolve(a.trim())));
 
-// Read a line without echoing it (for passwords)
+// Read a line without echoing it (for passwords): readline keeps the terminal in raw mode, we just
+// stop it from writing the typed characters back to the screen.
+let muted = false;
+rl._writeToOutput = (text) => {
+  if (!muted) rl.output.write(text);
+};
 function askHidden(q) {
+  if (!process.stdin.isTTY) throw new Error('Run this in a terminal so the password is not shown');
   return new Promise((resolve) => {
-    process.stdout.write(q);
-    const stdin = process.stdin;
-    let value = '';
-    rl.pause();
-    stdin.setRawMode?.(true);
-    stdin.resume();
-    const onData = (buf) => {
-      for (const ch of buf.toString('utf8')) {
-        if (ch === '\r' || ch === '\n') {
-          stdin.setRawMode?.(false);
-          stdin.removeListener('data', onData);
-          process.stdout.write('\n');
-          rl.resume();
-          return resolve(value);
-        }
-        if (ch === '\u0003') process.exit(1); // Ctrl+C
-        if (ch === '\u007f' || ch === '\b') value = value.slice(0, -1);
-        else value += ch;
-      }
-    };
-    stdin.on('data', onData);
+    rl.question(q, (a) => {
+      muted = false;
+      process.stdout.write('\n');
+      resolve(a);
+    });
+    muted = true; // after the prompt is drawn
   });
 }
 
