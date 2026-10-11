@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { pool, query } from '../config/db.js';
+import { hashPassword, MIN_PASSWORD_LENGTH } from '../auth/password.js';
+import { readCookie } from '../auth/session.js';
+import { createHash } from 'node:crypto';
 
 // Admin API: users & role assignment, roles, projects & teams.
-// Note: there is no login yet, so these endpoints are not access-controlled.
+// Access: signed-in users whose role has the 'admin' permission (enforced in app.js).
 
 const router = Router();
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -38,7 +41,8 @@ const handle = (fn) => async (req, res, next) => {
 
 router.get('/admin', handle(async (req, res) => {
   const [users, roles, projects] = await Promise.all([
-    query(`SELECT u.id, u.name, u.email, u.status, u.role_id, r.name AS role,
+    query(`SELECT u.id, u.name, u.email, u.status, u.role_id, r.name AS role, u.username, u.last_login_at,
+                  (u.password_hash IS NOT NULL AND u.username IS NOT NULL) AS can_sign_in,
                   (u.jira_account_id IS NOT NULL) AS from_jira,
                   COALESCE(array_agg(p.id ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '{}') AS project_ids,
                   COALESCE(array_agg(p.name ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '{}') AS projects
@@ -78,8 +82,14 @@ function userInput(body) {
     roleId: body.roleId || null,
     projectIds: Array.isArray(body.projectIds) ? body.projectIds : [],
     status: oneOf(body.status || 'active', STATUSES, 'Status'),
+    // Sign-in: empty username = cannot sign in; password only needed when setting/changing it
+    username: text(body.username, 'Username', { max: 60 }),
+    password: typeof body.password === 'string' && body.password !== '' ? body.password : null,
   };
   isEmail(u.email);
+  if (u.username && !/^[a-zA-Z0-9._-]{3,60}$/.test(u.username)) fail('Username must be 3–60 letters, numbers, dots, dashes or underscores');
+  if (u.password && u.password.length < MIN_PASSWORD_LENGTH) fail(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+  if (u.password && !u.username) fail('Set a username to go with the password');
   if (u.roleId && !UUID.test(u.roleId)) fail('Role is not valid');
   if (u.projectIds.some((p) => !UUID.test(p))) fail('Projects are not valid');
   return u;
@@ -91,6 +101,35 @@ async function saveUserProjects(client, userId, projectIds) {
     await client.query('INSERT INTO user_projects (user_id, project_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, p]);
   }
 }
+
+// Save sign-in details. Clearing the username removes the ability to sign in.
+async function saveLogin(c, userId, u, { isNew }) {
+  if (!u.username) {
+    await c.query('UPDATE users SET username = NULL, password_hash = NULL WHERE id = $1', [userId]);
+    return { passwordChanged: true };
+  }
+  const taken = await c.query('SELECT 1 FROM users WHERE lower(username) = lower($1) AND id <> $2', [u.username, userId]);
+  if (taken.rowCount) fail('That username is already taken');
+  const { rows } = await c.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+  if (!u.password && !rows[0]?.password_hash) fail(isNew ? 'Set a password for the new sign-in' : 'Set a password to enable sign-in');
+  const hash = u.password ? await hashPassword(u.password) : rows[0].password_hash;
+  await c.query('UPDATE users SET username = $2, password_hash = $3 WHERE id = $1', [userId, u.username, hash]);
+  return { passwordChanged: !!u.password };
+}
+
+// There must always be at least one active administrator who can sign in
+async function ensureAdminRemains(c) {
+  const { rows } = await c.query(
+    `SELECT count(*)::int AS n FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.status = 'active' AND u.password_hash IS NOT NULL AND u.username IS NOT NULL AND 'admin' = ANY (r.permissions)`
+  );
+  if (!rows[0].n) fail('At least one active administrator who can sign in must remain');
+}
+
+const tokenHash = (req) => {
+  const t = readCookie(req);
+  return t ? createHash('sha256').update(t).digest('hex') : null;
+};
 
 async function inTransaction(fn) {
   const client = await pool.connect();
@@ -115,6 +154,7 @@ router.post('/admin/users', handle(async (req, res) => {
       [u.name, u.email, u.roleId, u.status]
     );
     await saveUserProjects(c, rows[0].id, u.projectIds);
+    if (u.username) await saveLogin(c, rows[0].id, u, { isNew: true });
     return rows[0].id;
   });
   res.status(201).json({ id });
@@ -122,12 +162,26 @@ router.post('/admin/users', handle(async (req, res) => {
 
 router.put('/admin/users/:id', handle(async (req, res) => {
   const u = userInput(req.body ?? {});
+  const isSelf = req.params.id === req.user.id;
+  if (isSelf && u.status !== 'active') fail('You can’t deactivate your own account');
   const found = await inTransaction(async (c) => {
     const { rowCount } = await c.query(
       'UPDATE users SET name = $2, email = $3, role_id = $4, status = $5 WHERE id = $1',
       [req.params.id, u.name, u.email, u.roleId, u.status]
     );
-    if (rowCount) await saveUserProjects(c, req.params.id, u.projectIds);
+    if (!rowCount) return 0;
+    await saveUserProjects(c, req.params.id, u.projectIds);
+    const { passwordChanged } = await saveLogin(c, req.params.id, u, { isNew: false });
+    if (isSelf) {
+      const { rows } = await c.query('SELECT permissions FROM roles WHERE id = $1', [u.roleId]);
+      if (!rows[0]?.permissions.includes('admin')) fail('You can’t remove your own admin access');
+      if (!u.username) fail('You can’t remove your own sign-in');
+    }
+    await ensureAdminRemains(c);
+    // Sign the person out elsewhere when their password changes or they are deactivated
+    if (passwordChanged || u.status !== 'active') {
+      await c.query('DELETE FROM sessions WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2', [req.params.id, isSelf ? tokenHash(req) : null]);
+    }
     return rowCount;
   });
   if (!found) return res.status(404).json({ error: 'User not found' });
@@ -135,6 +189,7 @@ router.put('/admin/users/:id', handle(async (req, res) => {
 }));
 
 router.delete('/admin/users/:id', handle(async (req, res) => {
+  if (req.params.id === req.user.id) return res.status(409).json({ error: 'You can’t delete your own account' });
   const { rows } = await query('SELECT jira_account_id FROM users WHERE id = $1', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'User not found' });
   if (rows[0].jira_account_id) {
@@ -168,8 +223,12 @@ router.post('/admin/roles', handle(async (req, res) => {
 
 router.put('/admin/roles/:id', handle(async (req, res) => {
   const r = roleInput(req.body ?? {});
-  const { rowCount } = await query('UPDATE roles SET name = $2, description = $3, permissions = $4 WHERE id = $1',
-    [req.params.id, r.name, r.description, r.permissions]);
+  const rowCount = await inTransaction(async (c) => {
+    const result = await c.query('UPDATE roles SET name = $2, description = $3, permissions = $4 WHERE id = $1',
+      [req.params.id, r.name, r.description, r.permissions]);
+    await ensureAdminRemains(c);
+    return result.rowCount;
+  });
   if (!rowCount) return res.status(404).json({ error: 'Role not found' });
   res.json({ ok: true });
 }));

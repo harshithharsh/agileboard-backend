@@ -12,6 +12,18 @@ npm run dev            # http://localhost:4000
 ```
 Create the database first; see the `agileboard-database` repo.
 
+## Sign-in
+Everything except `/api/health` needs a signed-in user. Create the first administrator yourself (asks for name, username and a hidden password):
+```bash
+npm run create-admin
+```
+After that, administrators give other people a username and password in **Admin → Users & Role Assignment**.
+
+- Passwords are hashed with scrypt; sessions are random tokens in an HttpOnly cookie (`am_session`, 7 days), stored hashed in `sessions`.
+- 5 failed sign-ins for a username from one IP lock it for 15 minutes.
+- Roles: any signed-in user can view; **Refresh** (Jira sync) needs the `edit` permission; Admin needs `admin`.
+- Set `COOKIE_SECURE=true` when serving over HTTPS, and `CORS_ORIGIN` if the frontend is not on `http://localhost:5173`.
+
 ## Jira sync
 1. Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens
 2. In `.env`, set `JIRA_BASE_URL`, `JIRA_EMAIL` (your Atlassian login) and `JIRA_API_TOKEN`. Never commit `.env`.
@@ -41,8 +53,10 @@ Tests for the Jira mapping: `npm test`.
 |---|---|---|
 | GET | `/api/health` | API + DB health check |
 | GET | `/api/filters` | Options for the filter bar: projects, teams, releases, sprints, assignees |
-| GET / POST / PUT / DELETE | `/api/admin…` | Admin: users (`/admin/users`), roles (`/admin/roles`), projects & teams (`/admin/projects`). Not access-controlled yet (no login) |
-| GET / POST | `/api/sync` | Last sync status / run a Jira sync now |
+| POST | `/api/auth/login`, `/api/auth/logout` | Sign in (username + password) / sign out |
+| GET | `/api/auth/me` | The signed-in user and their permissions |
+| GET / POST / PUT / DELETE | `/api/admin…` | Admin (needs `admin`): users (`/admin/users`), roles (`/admin/roles`), projects & teams (`/admin/projects`) |
+| GET / POST | `/api/sync` | Last sync status / run a Jira sync now (POST needs `edit`) |
 | GET | `/api/dashboard?teamId=&quarter=&sprintId=&assigneeId=` | Everything the dashboard shows for one team and sprint. `quarter` (e.g. `2026-Q3`) limits the trend charts to sprints that started in that quarter; `sprintId` defaults to the latest sprint (in the quarter) |
 
 ## How metrics are calculated

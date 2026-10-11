@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "sync": "node scripts/sync.js",
-    "test": "node --test"
+    "test": "node --test",
+    "create-admin": "node scripts/create-admin.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
