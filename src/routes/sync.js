@@ -1,32 +1,27 @@
 import { Router } from 'express';
-import { syncFromJira, lastSync } from '../jira/sync.js';
-import { JiraConfigError } from '../jira/client.js';
+import { syncFromJira, lastSync, isSyncRunning } from '../jira/sync.js';
 import { requirePermission } from '../auth/middleware.js';
 
 const router = Router();
 
+// Status of the latest sync: { latest: { status: running | success | failed, message, ... }, lastSuccessAt }
 router.get('/sync', async (req, res, next) => {
   try {
-    res.json(await lastSync());
+    res.json({ ...(await lastSync()), running: isSyncRunning() });
   } catch (err) { next(err); }
 });
 
-// Pull the latest data from Jira (used by the dashboard's Refresh button)
+// Start a Jira sync (the dashboard's Refresh button). A full sync takes a minute or more, longer than
+// hosting proxies keep a request open (Hostinger's CDN gives up after 60 s), so it runs in the background:
+// this answers 202 straight away and the dashboard polls GET /api/sync until it has finished.
 router.post('/sync', requirePermission('edit'), async (req, res, next) => {
   try {
-    const result = await syncFromJira({ log: () => {} });
-    res.json({ ...result, ...(await lastSync()) });
-  } catch (err) {
-    if (err instanceof JiraConfigError) return res.status(503).json({ error: err.message });
-    if (/^Jira \d+/.test(err.message)) return res.status(502).json({ error: err.message });
-    // Network problems (no internet, DNS, VPN, timeouts) show up as "fetch failed" with a cause code
-    const code = err.cause?.code;
-    if (err.message === 'fetch failed' || ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT'].includes(code)) {
-      const host = err.cause?.hostname ? ` (${err.cause.hostname})` : '';
-      return res.status(502).json({ error: `Cannot reach Jira${host}: ${code || 'network error'}. Check your internet connection or VPN` });
+    const alreadyRunning = isSyncRunning();
+    if (!alreadyRunning) {
+      syncFromJira({ log: () => {} }).catch((err) => console.error('Jira sync failed:', err.message));
     }
-    next(err);
-  }
+    res.status(202).json({ started: !alreadyRunning, running: true });
+  } catch (err) { next(err); }
 });
 
 export default router;

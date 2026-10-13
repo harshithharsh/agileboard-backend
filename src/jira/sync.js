@@ -177,13 +177,31 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
       log(message);
       return { status: 'success', message };
     } catch (err) {
-      await query(`UPDATE sync_runs SET status = 'failed', finished_at = now(), message = $2 WHERE id = $1`, [run.id, err.message]);
+      await query(`UPDATE sync_runs SET status = 'failed', finished_at = now(), message = $2 WHERE id = $1`, [run.id, describeSyncError(err)]);
       throw err;
     }
   })().finally(() => {
     running = null;
   });
   return running;
+}
+
+export const isSyncRunning = () => running !== null;
+
+// A readable reason for a failed sync (stored with the run and shown on the dashboard)
+export function describeSyncError(err) {
+  const code = err.cause?.code;
+  if (err.message === 'fetch failed' || ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT'].includes(code)) {
+    const host = err.cause?.hostname ? ` (${err.cause.hostname})` : '';
+    return `Cannot reach Jira${host}: ${code || 'network error'}. Check the server's internet connection`;
+  }
+  return err.message;
+}
+
+// Runs left 'running' by a restart mid-sync never finish: mark them failed at startup
+export async function closeInterruptedSyncs() {
+  await query(`UPDATE sync_runs SET status = 'failed', finished_at = now(), message = 'Interrupted (the server restarted during the sync)'
+                WHERE status = 'running'`);
 }
 
 export async function lastSync() {
