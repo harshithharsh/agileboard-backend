@@ -98,8 +98,10 @@ async function saveSprint(team, sprint, records, timeZone) {
       }
       await client.query('DELETE FROM blocked_periods WHERE issue_id = $1', [issue.id]);
       for (const b of r.blocked) {
-        await client.query('INSERT INTO blocked_periods (issue_id, reason, external, started_at, ended_at) VALUES ($1, $2, $3, $4, $5)',
-          [issue.id, b.reason, b.external, b.started_at, b.ended_at]);
+        await client.query(
+          `INSERT INTO blocked_periods (issue_id, reason, external, started_at, ended_at, blocked_in_status, blocked_assignee)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [issue.id, b.reason, b.external, b.started_at, b.ended_at, b.blocked_in_status ?? null, b.blocked_assignee ?? null]);
       }
       if (r.defect) {
         const d = r.defect;

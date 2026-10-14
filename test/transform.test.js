@@ -61,6 +61,18 @@ test('flagged periods become blocked periods', () => {
   assert.equal(r.blocked[0].ended_at.toISOString(), '2026-09-07T10:00:00.000Z');
 });
 
+test('a blocked period records the status and assignee it was blocked in', () => {
+  const h = [
+    { created: '2026-09-04T10:00:00.000+0000', items: [{ field: 'assignee', fromString: 'Asha', toString: 'Ravi' }] },
+    { created: '2026-09-05T10:00:00.000+0000', items: [{ field: 'status', from: '3', to: '9', fromString: 'Delivered to QA', toString: 'Hold' }] },
+    { created: '2026-09-06T10:00:00.000+0000', items: [{ field: 'status', from: '9', to: '3', fromString: 'Hold', toString: 'Delivered to QA' }] },
+  ];
+  const r = transformIssue(issue, h, { sprint: sprint1, fields, statusById });
+  assert.equal(r.blocked.length, 1);
+  assert.equal(r.blocked[0].blocked_in_status, 'Delivered to QA');
+  assert.equal(r.blocked[0].blocked_assignee, 'Ravi');
+});
+
 test('status mapping', () => {
   assert.equal(mapStatus('Code Review', 'indeterminate'), 'in_review');
   assert.equal(mapStatus('QA Testing', 'indeterminate'), 'in_test');

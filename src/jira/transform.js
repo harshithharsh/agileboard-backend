@@ -123,18 +123,31 @@ export function transformIssue(issue, histories, ctx) {
   }
 
   // --- blocked periods (Flagged = Impediment, or a status named "Blocked") ------
+  // Also note the Jira status and assignee at the moment it got blocked (who it is stuck with)
   const blocked = [];
   let open = null;
+  let statusName = items.find((i) => i.field === 'status')?.fromString ?? f.status?.name ?? null;
+  const firstAssignee = items.find((i) => i.field === 'assignee');
+  let assigneeName = firstAssignee ? firstAssignee.fromString ?? null : f.assignee?.displayName ?? null;
   for (const i of items) {
     const flagOn = i.field === 'Flagged' && /impediment/i.test(i.toString || '');
     const flagOff = i.field === 'Flagged' && !/impediment/i.test(i.toString || '');
     const statusBlockedOn = i.field === 'status' && /block|hold/i.test(i.toString || '');
     const statusBlockedOff = i.field === 'status' && /block|hold/i.test(i.fromString || '') && !/block|hold/i.test(i.toString || '');
-    if ((flagOn || statusBlockedOn) && !open) open = { started_at: i.at, reason: flagOn ? 'Flagged as impediment' : `Status: ${i.toString}` };
+    if ((flagOn || statusBlockedOn) && !open) {
+      open = {
+        started_at: i.at,
+        reason: flagOn ? 'Flagged as impediment' : `Status: ${i.toString}`,
+        blocked_in_status: statusBlockedOn ? i.fromString ?? null : statusName,
+        blocked_assignee: assigneeName,
+      };
+    }
     if ((flagOff || statusBlockedOff) && open) {
       blocked.push({ ...open, ended_at: i.at });
       open = null;
     }
+    if (i.field === 'status') statusName = i.toString ?? statusName;
+    if (i.field === 'assignee') assigneeName = i.toString ?? null;
   }
   if (open) blocked.push({ ...open, ended_at: null });
   const external = /external|vendor|dependency|client/i.test((f.labels || []).join(' '));

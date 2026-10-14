@@ -1,5 +1,6 @@
 import { query } from '../config/db.js';
 import { lastSync } from '../jira/sync.js';
+import { stageOf, STAGES } from './stage.js';
 
 const DAY_MS = 86400000;
 const TREND_SPRINTS = 6; // sprints in the trend charts when no quarter is chosen; also the velocity-band history
@@ -85,7 +86,8 @@ async function loadData(sprintIds, assigneeId) {
       [issueIds]
     ),
     query(
-      `SELECT b.*, i.issue_key, i.title FROM blocked_periods b JOIN issues i ON i.id = b.issue_id
+      `SELECT b.*, i.issue_key, i.title, i.jira_status, u.name AS assignee_name
+         FROM blocked_periods b JOIN issues i ON i.id = b.issue_id LEFT JOIN users u ON u.id = i.assignee_id
         WHERE b.issue_id = ANY($1)`,
       [issueIds]
     ),
@@ -158,7 +160,8 @@ function sprintStats(sprint, data, historyByIssue) {
   const blockedPeriods = data.blocked
     .filter((b) => itemIds.has(b.issue_id))
     .map((b) => {
-      const bEnd = b.ended_at || end;
+      // Still blocked: count up to now (or the sprint end, if that has passed), not to a future end date
+      const bEnd = b.ended_at || new Date(Math.min(end, Date.now()));
       const overlap = Math.min(bEnd, end) - Math.max(b.started_at, start);
       return { ...b, overlapDays: overlap / DAY_MS, lengthDays: (bEnd - b.started_at) / DAY_MS };
     })
@@ -229,7 +232,20 @@ function sprintStats(sprint, data, historyByIssue) {
       external: externalIssues.size,
       list: blockedPeriods
         .sort((a, b) => b.lengthDays - a.lengthDays)
-        .map((b) => ({ issueKey: b.issue_key, title: b.title, reason: b.reason, external: b.external, days: round(b.lengthDays, 1), open: !b.ended_at })),
+        .map((b) => ({
+          issueKey: b.issue_key, title: b.title, reason: b.reason, external: b.external, days: round(b.lengthDays, 1), open: !b.ended_at,
+          startedAt: b.started_at, endedAt: b.ended_at,
+          // Who it is stuck with: the workflow stage it was in when blocked
+          blockedIn: b.blocked_in_status, stage: stageOf(b.blocked_in_status),
+          // Still blocked: the current assignee is the person to chase; otherwise who had it then
+          assignee: !b.ended_at ? b.assignee_name ?? b.blocked_assignee : b.blocked_assignee ?? b.assignee_name,
+          currentStatus: b.jira_status,
+        })),
+      byStage: STAGES.map((stage) => ({
+        stage,
+        issues: new Set(blockedPeriods.filter((b) => stageOf(b.blocked_in_status) === stage).map((b) => b.issue_id)).size,
+        open: new Set(blockedPeriods.filter((b) => !b.ended_at && stageOf(b.blocked_in_status) === stage).map((b) => b.issue_id)).size,
+      })).filter((s) => s.issues > 0),
     },
     defects: {
       created: defects.length,
