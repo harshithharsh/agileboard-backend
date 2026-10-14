@@ -43,8 +43,12 @@ function meetsTarget(value, target) {
 // Data loading
 // ---------------------------------------------------------------------------
 
-// Calendar quarter a date falls in: '2026-07-01' -> '2026-Q3'
-export const quarterOf = (date) => `${date.slice(0, 4)}-Q${Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1}`;
+// Indian financial-year quarter a date falls in (the year runs April to March):
+// Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar. '2026-10-07' -> 'FY2026-Q3' (FY 2026-27), '2027-02-01' -> 'FY2026-Q4'
+export const quarterOf = (date) => {
+  const year = Number(date.slice(0, 4)), month = Number(date.slice(5, 7));
+  return `FY${month >= 4 ? year : year - 1}-Q${Math.floor(((month + 8) % 12) / 3) + 1}`;
+};
 
 // Returns the selected sprint plus the ones before it for one team. With a quarter, the selected sprint
 // defaults to the latest one that started in that quarter.
@@ -298,7 +302,7 @@ function burndown(sprint, stats) {
 // Dashboard assembly
 // ---------------------------------------------------------------------------
 
-// quarter ('2026-Q3') limits the trend charts to sprints that started in that quarter.
+// quarter ('FY2026-Q3', Indian financial year) limits the trend charts to sprints that started in that quarter.
 export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
   const window = await loadSprintWindow(teamId, sprintId, quarter);
   if (!window.length) return null;

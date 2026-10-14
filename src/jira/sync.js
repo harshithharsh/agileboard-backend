@@ -3,8 +3,10 @@ import { createJiraClient } from './client.js';
 import { transformIssue, pickSprints, mapSprintState, doneStatusIds, localDate } from './transform.js';
 
 const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
-// Sync every sprint that started since this date (default: 1 January of the current year), for the quarter filter
-const SYNC_SINCE = process.env.JIRA_SYNC_SINCE || `${new Date().getFullYear()}-01-01`;
+// Sync every sprint that started since this date, for the quarter filter
+// (default: 1 April, the start of the current Indian financial year)
+const today = new Date();
+const SYNC_SINCE = process.env.JIRA_SYNC_SINCE || `${today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1}-04-01`;
 let running = null; // only one sync at a time
 
 // Find the custom field ids for Sprint and Story Points (they differ between Jira sites).

@@ -12,11 +12,11 @@ router.get('/filters', async (req, res, next) => {
 });
 
 // Full dashboard for one team and sprint.
-// Query: teamId (required), quarter (e.g. 2026-Q3: trend charts show that quarter's sprints),
+// Query: teamId (required), quarter (financial year, e.g. FY2026-Q3 = Oct–Dec 2026: trend charts show that quarter's sprints),
 // sprintId (default: latest, within the quarter if given), assigneeId
 router.get('/dashboard', async (req, res, next) => {
   const { teamId, sprintId, assigneeId, quarter } = req.query;
-  if (quarter && !/^\d{4}-Q[1-4]$/.test(quarter)) return res.status(400).json({ error: 'quarter must look like 2026-Q3' });
+  if (quarter && !/^FY\d{4}-Q[1-4]$/.test(quarter)) return res.status(400).json({ error: 'quarter must look like FY2026-Q3' });
   if (!UUID.test(teamId || '')) return res.status(400).json({ error: 'teamId is required' });
   for (const [name, value] of Object.entries({ sprintId, assigneeId })) {
     if (value && !UUID.test(value)) return res.status(400).json({ error: `${name} is not a valid id` });

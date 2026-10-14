@@ -32,7 +32,7 @@ After that, administrators give other people a username and password in **Admin 
 Sprint start and end dates are converted from Jira's UTC timestamps to `JIRA_TIMEZONE` (default: the syncing Jira account's timezone), so they match the dates shown in Jira.
 
 Each team maps to a Jira board (`teams.jira_board_id`), managed in **Admin → Project Configuration**; only active projects are synced.
-For every board the sync pulls the active sprint(s), every closed sprint since `JIRA_SYNC_SINCE` (default 1 January of the current year) and at least the last `JIRA_SYNC_CLOSED_SPRINTS` (default 6) closed sprints,
+For every board the sync pulls the active sprint(s), every closed sprint since `JIRA_SYNC_SINCE` (default 1 April, the start of the current Indian financial year) and at least the last `JIRA_SYNC_CLOSED_SPRINTS` (default 6) closed sprints,
 and for each sprint its issues with their changelog. Sub-tasks and epics are skipped.
 
 | AgileBoard | From Jira |
@@ -59,7 +59,7 @@ Tests for the Jira mapping: `npm test`.
 | GET | `/api/admin/jira/projects`, `/api/admin/jira/projects/:key/boards` | Active Jira projects (for Add Project) and a project's Scrum boards (filled in as teams) |
 | GET / POST / PUT / DELETE | `/api/admin…` | Admin (needs `admin`): users (`/admin/users`), roles (`/admin/roles`), projects & teams (`/admin/projects`) |
 | GET / POST | `/api/sync` | GET: latest sync status (`running`, `latest.status`, `latest.message`). POST (needs `edit`): start a Jira sync in the background and answer `202` at once; poll GET until `running` is false. A full sync takes 1–2 minutes, longer than hosting proxies keep a request open |
-| GET | `/api/dashboard?teamId=&quarter=&sprintId=&assigneeId=` | Everything the dashboard shows for one team and sprint. `quarter` (e.g. `2026-Q3`) limits the trend charts to sprints that started in that quarter; `sprintId` defaults to the latest sprint (in the quarter) |
+| GET | `/api/dashboard?teamId=&quarter=&sprintId=&assigneeId=` | Everything the dashboard shows for one team and sprint. `quarter` (Indian financial year, April–March: e.g. `FY2026-Q3` = Oct–Dec 2026) limits the trend charts to sprints that started in that quarter; `sprintId` defaults to the latest sprint (in the quarter) |
 
 ## How metrics are calculated
 All metrics are calculated in `src/services/dashboard.js` from the raw sprint data.
