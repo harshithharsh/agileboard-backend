@@ -69,7 +69,7 @@ async function loadData(sprintIds, assigneeId) {
 
   const { rows: items } = await query(
     `SELECT si.sprint_id, si.commitment, si.outcome, si.points, si.added_at,
-            i.id AS issue_id, i.issue_key, i.title, i.type, i.priority, i.started_at, i.completed_at,
+            i.id AS issue_id, i.issue_key, i.title, i.type, i.priority, i.jira_status, i.started_at, i.completed_at,
             i.dor_met, i.dod_met, i.has_acceptance_criteria, i.code_reviewed, i.tests_complete, i.automated
        FROM sprint_issues si
        JOIN issues i ON i.id = si.issue_id
@@ -380,7 +380,19 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
     card('predictability', 'Sprint Predictability', cur.predictability, prev?.predictability ?? null, '%', targets.predictability),
     card('velocity', 'Velocity', cur.velocity, prev?.velocity ?? null, 'SP', null),
     card('spillover', 'Spillover', cur.spilloverPct, prev?.spilloverPct ?? null, '%', targets.spillover),
-    card('unplanned', 'Unplanned Work', cur.unplannedPct, prev?.unplannedPct ?? null, '%', targets.unplanned),
+    {
+      ...card('unplanned', 'Unplanned Work', cur.unplannedPct, prev?.unplannedPct ?? null, '%', targets.unplanned),
+      // Issues added after the sprint started (scope change), for the Scrum Master's drill-down
+      addedIssues: cur.items
+        .filter((i) => i.commitment === 'added')
+        .sort((a, b) => (a.added_at ?? 0) - (b.added_at ?? 0))
+        .map((i) => ({
+          key: i.issue_key, title: i.title, type: i.type, points: i.points ?? 0,
+          addedAt: i.added_at, status: i.jira_status, done: i.outcome === 'completed',
+        })),
+      addedPoints: cur.added,
+      committedPoints: cur.committed,
+    },
     p1Card,
   ];
 
