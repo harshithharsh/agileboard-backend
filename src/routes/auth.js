@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query } from '../config/db.js';
 import { verifyPassword } from '../auth/password.js';
-import { createSession, destroySession, readCookie, sessionCookie, clearedCookie, userForToken } from '../auth/session.js';
+import { createSession, destroySession, readCookie, sessionCookie, clearedCookie, userForToken, activeUser } from '../auth/session.js';
 
 const router = Router();
 
@@ -47,7 +47,7 @@ router.post('/auth/logout', async (req, res, next) => {
 
 router.get('/auth/me', async (req, res, next) => {
   try {
-    const user = await userForToken(readCookie(req));
+    const user = await activeUser(req, res);
     if (!user) return res.status(401).json({ error: 'Please sign in' });
     res.json({ user });
   } catch (err) { next(err); }

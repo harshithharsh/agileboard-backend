@@ -1,9 +1,9 @@
-import { readCookie, userForToken } from './session.js';
+import { activeUser } from './session.js';
 
-// Attach req.user from the session cookie; 401 when not signed in.
+// Attach req.user from the session cookie (and keep the session alive); 401 when not signed in.
 export async function requireAuth(req, res, next) {
   try {
-    const user = await userForToken(readCookie(req));
+    const user = await activeUser(req, res);
     if (!user) return res.status(401).json({ error: 'Please sign in' });
     req.user = user;
     next();

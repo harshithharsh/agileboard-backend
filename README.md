@@ -19,7 +19,7 @@ npm run create-admin
 ```
 After that, administrators give other people a username and password in **Admin → Users & Role Assignment**.
 
-- Passwords are hashed with scrypt; sessions are random tokens in an HttpOnly cookie (`am_session`, 7 days), stored hashed in `sessions`.
+- Passwords are hashed with scrypt; sessions are random tokens in an HttpOnly cookie (`am_session`), stored hashed in `sessions`. A session ends after 6 hours without activity (`SESSION_IDLE_HOURS`); every request keeps it alive.
 - 5 failed sign-ins for a username from one IP lock it for 15 minutes.
 - Roles: any signed-in user can view; **Refresh** (Jira sync) needs the `edit` permission; Admin needs `admin`.
 - Set `COOKIE_SECURE=true` when serving over HTTPS, and `CORS_ORIGIN` if the frontend is not on `http://localhost:5173`.
