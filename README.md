@@ -55,6 +55,7 @@ Tests for the Jira mapping: `npm test`.
 | GET | `/api/filters` | Options for the filter bar: projects, teams, releases, sprints, assignees |
 | POST | `/api/auth/login`, `/api/auth/logout` | Sign in (username + password) / sign out |
 | GET | `/api/auth/me` | The signed-in user and their permissions |
+| PUT | `/api/sprints/:id/goal-outcome` | Record a sprint's goal outcome (`met`, `partly_met`, `not_met`, or `null` to clear) with an optional note; needs `edit`. Issues labelled `sprint-goal` in Jira (`SPRINT_GOAL_LABEL`) are the goal items used for the suggested outcome |
 | GET / PUT | `/api/me/preferences` | The signed-in user's dashboard layout (`dashboardLayout`: `[{ id, size, hidden }]`, or `null` for the default) |
 | GET | `/api/admin/jira/projects`, `/api/admin/jira/projects/:key/boards` | Active Jira projects (for Add Project) and a project's Scrum boards (filled in as teams) |
 | GET / POST / PUT / DELETE | `/api/admin…` | Admin (needs `admin`): users (`/admin/users`), roles (`/admin/roles`), projects & teams (`/admin/projects`) |

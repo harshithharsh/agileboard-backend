@@ -57,13 +57,16 @@ export function mapSeverity(priorityName = '') {
   return 'medium';
 }
 
+// Jira label that marks an issue as part of the sprint goal
+export const GOAL_LABEL = (process.env.SPRINT_GOAL_LABEL || 'sprint-goal').toLowerCase();
+
 const splitIds = (value) => (value ? String(value).split(',').map((s) => s.trim()).filter(Boolean) : []);
 const toDate = (v) => (v ? new Date(v) : null);
 
 // Flatten changelog histories into [{ at, field, fieldId, from, to, fromString, toString }] sorted by time.
 export function changelogItems(histories = []) {
   return histories
-    .flatMap((h) => h.items.map((item) => ({ ...item, at: new Date(h.created) })))
+    .flatMap((h) => h.items.map((item) => ({ ...item, at: new Date(h.created), author: h.author?.displayName ?? null })))
     .sort((a, b) => a.at - b.at);
 }
 
@@ -112,6 +115,8 @@ export function transformIssue(issue, histories, ctx) {
     (i) => (i.fieldId === sprintField || i.field === 'Sprint') && splitIds(i.to).includes(sprintId) && !splitIds(i.from).includes(sprintId)
   );
   const addedAt = joined?.at ?? created;
+  // Who put it in the sprint: the changelog author, or whoever created it straight into the sprint
+  const addedBy = joined ? joined.author : f.creator?.displayName ?? f.reporter?.displayName ?? null;
   const commitment = sprintStart && addedAt > new Date(sprintStart.getTime() + GRACE_MS) ? 'added' : 'committed';
 
   // --- outcome ---------------------------------------------------------------
@@ -174,7 +179,9 @@ export function transformIssue(issue, histories, ctx) {
       dod: currentStatus === 'done' ? true : null,
       acceptanceCriteria: /acceptance criteria|given .* when .* then/i.test(description),
     },
-    membership: { commitment, outcome, points, addedAt },
+    membership: { commitment, outcome, points, addedAt, addedBy },
+    // Tagged in Jira as part of the sprint goal
+    isGoalItem: (f.labels || []).some((l) => l.toLowerCase() === GOAL_LABEL),
     history,
     blocked: blocked.map((b) => ({ ...b, external })),
     defect:

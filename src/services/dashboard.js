@@ -1,6 +1,7 @@
 import { query } from '../config/db.js';
 import { lastSync } from '../jira/sync.js';
 import { stageOf, STAGES } from './stage.js';
+import { suggestOutcome, hitRate } from './sprintGoal.js';
 
 const DAY_MS = 86400000;
 const TREND_SPRINTS = 6; // sprints in the trend charts when no quarter is chosen; also the velocity-band history
@@ -73,7 +74,7 @@ async function loadData(sprintIds, assigneeId) {
   const params = assigneeId ? [sprintIds, assigneeId] : [sprintIds];
 
   const { rows: items } = await query(
-    `SELECT si.sprint_id, si.commitment, si.outcome, si.points, si.added_at,
+    `SELECT si.sprint_id, si.commitment, si.outcome, si.points, si.added_at, si.added_by, i.is_goal_item,
             i.id AS issue_id, i.issue_key, i.title, i.type, i.priority, i.jira_status, i.started_at, i.completed_at,
             i.dor_met, i.dod_met, i.has_acceptance_criteria, i.code_reviewed, i.tests_complete, i.automated
        FROM sprint_issues si
@@ -314,6 +315,13 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
     ),
     loadData(window.map((s) => s.id), assigneeId),
   ]);
+  const { rows: outcomeRows } = await query(
+    `SELECT o.sprint_id, o.outcome, o.note, o.recorded_at, u.name AS recorded_by
+       FROM sprint_goal_outcomes o LEFT JOIN users u ON u.id = o.recorded_by
+      WHERE o.sprint_id = ANY($1)`,
+    [window.map((s) => s.id)]
+  );
+  const outcomesBySprint = new Map(outcomeRows.map((o) => [o.sprint_id, o]));
   const team = teamRows[0];
   const { rows: targetRows } = await query('SELECT metric, operator, value::float AS value FROM metric_targets WHERE project_id = $1', [team.project_id]);
   const targets = Object.fromEntries(targetRows.map((t) => [t.metric, t]));
@@ -408,7 +416,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
         .sort((a, b) => (a.added_at ?? 0) - (b.added_at ?? 0))
         .map((i) => ({
           key: i.issue_key, title: i.title, type: i.type, points: i.points ?? 0,
-          addedAt: i.added_at, status: i.jira_status, done: i.outcome === 'completed',
+          addedAt: i.added_at, addedBy: i.added_by, status: i.jira_status, done: i.outcome === 'completed',
         })),
       addedPoints: cur.added,
       committedPoints: cur.committed,
@@ -447,6 +455,21 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
 
   const previousThroughputs = trend.slice(0, -1).map((s) => s.throughput);
 
+  // Sprint goal: goal-tagged issues, suggested outcome, the recorded outcome, and the hit rate across the trend
+  const goalItems = cur.items
+    .filter((i) => i.is_goal_item)
+    .map((i) => ({ key: i.issue_key, title: i.title, status: i.jira_status, done: i.outcome === 'completed' }));
+  const recorded = outcomesBySprint.get(sprint.id);
+  const sprintGoal = {
+    text: sprint.goal,
+    items: goalItems,
+    ...suggestOutcome(goalItems, sprint.status),
+    outcome: recorded
+      ? { value: recorded.outcome, note: recorded.note, recordedBy: recorded.recorded_by, recordedAt: recorded.recorded_at }
+      : null,
+    hitRate: hitRate(trend.map((s) => window.find((w) => w.id === s.id)), outcomesBySprint),
+  };
+
   return {
     context: {
       project: { id: team.project_id, name: team.project_name },
@@ -459,6 +482,7 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
       sync: await lastSync(),
     },
     summary,
+    sprintGoal,
     delivery: trend.map((s, i) => ({
       sprintId: s.id,
       sprint: s.name,

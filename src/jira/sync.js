@@ -76,21 +76,21 @@ async function saveSprint(team, sprint, records, timeZone) {
       const assigneeId = await upsertUser(client, r.assignee, team.id);
       const { rows: [issue] } = await client.query(
         `INSERT INTO issues (project_id, issue_key, title, type, story_points, assignee_id, status, jira_status,
-                             started_at, completed_at, dod_met, has_acceptance_criteria, created_at, jira_issue_id, priority)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                             started_at, completed_at, dod_met, has_acceptance_criteria, created_at, jira_issue_id, priority, is_goal_item)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          ON CONFLICT (jira_issue_id) DO UPDATE SET
            issue_key = EXCLUDED.issue_key, title = EXCLUDED.title, type = EXCLUDED.type, story_points = EXCLUDED.story_points,
            assignee_id = EXCLUDED.assignee_id, status = EXCLUDED.status, jira_status = EXCLUDED.jira_status,
            started_at = EXCLUDED.started_at, completed_at = EXCLUDED.completed_at, dod_met = EXCLUDED.dod_met,
-           has_acceptance_criteria = EXCLUDED.has_acceptance_criteria, priority = EXCLUDED.priority
+           has_acceptance_criteria = EXCLUDED.has_acceptance_criteria, priority = EXCLUDED.priority, is_goal_item = EXCLUDED.is_goal_item
          RETURNING id`,
         [team.project_id, r.key, r.title, r.type, r.points, assigneeId, r.status, r.jiraStatus,
-          r.startedAt, r.completedAt, r.compliance.dod, r.compliance.acceptanceCriteria, r.createdAt, r.jiraId, r.priority]
+          r.startedAt, r.completedAt, r.compliance.dod, r.compliance.acceptanceCriteria, r.createdAt, r.jiraId, r.priority, r.isGoalItem]
       );
 
       await client.query(
-        `INSERT INTO sprint_issues (sprint_id, issue_id, commitment, outcome, points, added_at) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [saved.id, issue.id, r.membership.commitment, r.membership.outcome, r.membership.points, r.membership.addedAt]
+        `INSERT INTO sprint_issues (sprint_id, issue_id, commitment, outcome, points, added_at, added_by) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [saved.id, issue.id, r.membership.commitment, r.membership.outcome, r.membership.points, r.membership.addedAt, r.membership.addedBy]
       );
 
       await client.query('DELETE FROM issue_status_history WHERE issue_id = $1', [issue.id]);
@@ -130,7 +130,7 @@ async function syncTeam(jira, team, fields, statusById, log, timeZone) {
   const sprints = pickSprints(all, team.jira_board_id, SYNC_CLOSED_SPRINTS, SYNC_SINCE);
   log(`${team.name} (board ${team.jira_board_id}): ${sprints.map((s) => s.name).join(', ') || 'no sprints'}`);
 
-  const requestFields = ['summary', 'status', 'issuetype', 'assignee', 'created', 'resolutiondate', 'labels',
+  const requestFields = ['summary', 'status', 'issuetype', 'assignee', 'creator', 'reporter', 'created', 'resolutiondate', 'labels',
     'environment', 'priority', 'fixVersions', 'description', fields.storyPoints, fields.sprint].filter(Boolean);
 
   for (const sprint of sprints) {
