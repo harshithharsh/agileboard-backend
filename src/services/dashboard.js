@@ -381,6 +381,8 @@ export async function getDashboard({ teamId, sprintId, assigneeId, quarter }) {
     delta: null,
     caption: sprint.status === 'completed' ? 'Sprint closed' : `Day ${daysElapsed} of ${sprintDays.length}`,
     footLeft: `${shortDate(sprint.start_date)} – ${shortDate(sprint.end_date)}`,
+    // Raw dates, so the dashboard can format the range in the workspace's date format
+    range: { start: sprint.start_date, end: sprint.end_date },
     footRight: `${sprintDays.length} working days`,
     barPct: elapsedPct,
     status: sprint.status === 'completed' ? 'on_track' : 'in_progress',
