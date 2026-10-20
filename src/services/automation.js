@@ -2,7 +2,7 @@ import { query } from '../config/db.js';
 import { syncFromJira } from '../jira/sync.js';
 import { sendEmail, emailStatus } from './mailer.js';
 
-// Nightly Jira sync and its email notifications, configured by an admin in Workspace Settings.
+// Scheduled Jira sync and its email notifications, configured by an admin in Workspace Settings.
 // Stored in app_settings: 'sync_schedule', 'notifications' (settings) and 'sync_schedule_state' (last run).
 export const SCHEDULE_DEFAULTS = { enabled: false, time: '22:00', timeZone: process.env.JIRA_TIMEZONE || 'Asia/Kolkata' };
 export const NOTIFY_DEFAULTS = { onSuccess: true, onFailure: true, recipients: [] };
@@ -83,8 +83,8 @@ export async function notify(result) {
   if (!wanted || !settings.recipients.length || !emailStatus().configured) return false;
   const when = new Date(result.finishedAt).toUTCString();
   const subject = result.status === 'success'
-    ? `AgileMetrix: nightly Jira sync completed`
-    : `AgileMetrix: nightly Jira sync failed`;
+    ? `AgileMetrix: scheduled Jira sync completed`
+    : `AgileMetrix: scheduled Jira sync failed`;
   const text = result.status === 'success'
     ? `The scheduled Jira sync finished successfully.\n\n${result.message}\nDuration: ${result.seconds} seconds\nFinished: ${when}${appLink()}`
     : `The scheduled Jira sync failed.\n\nReason: ${result.message}\nFinished: ${when}\n\nThe dashboard keeps showing the last synced data.${appLink()}`;
@@ -117,7 +117,7 @@ export async function runScheduledSync(date) {
   console.log(`Scheduled Jira sync ${result.status}: ${result.message}${emailed ? ' (email sent)' : ''}`);
 }
 
-// Check every 30 seconds whether the nightly sync is due
+// Check every 30 seconds whether the scheduled sync is due
 export function startScheduler() {
   const tick = async () => {
     try {

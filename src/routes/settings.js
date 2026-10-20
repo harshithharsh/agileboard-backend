@@ -35,7 +35,7 @@ router.put('/admin/settings', requirePermission('admin'), async (req, res, next)
   } catch (err) { next(err); }
 });
 
-// Nightly sync and email notifications (admin only)
+// Scheduled sync and email notifications (admin only)
 async function automation() {
   const [schedule, notifications, state] = await Promise.all([getSchedule(), getNotifications(), getScheduleState()]);
   return { schedule, notifications, email: emailStatus(), lastRun: state.lastStatus ? state : null, nextRun: nextRun(schedule, state) };
