@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { query } from '../config/db.js';
 import { requirePermission } from '../auth/middleware.js';
+import { getSchedule, getNotifications, getScheduleState, validateAutomation, saveAutomation, nextRun } from '../services/automation.js';
+import { emailStatus, sendEmail } from '../services/mailer.js';
 
 // Workspace display settings: everyone signed in can read them, administrators change them.
 const router = Router();
@@ -31,6 +33,44 @@ router.put('/admin/settings', requirePermission('admin'), async (req, res, next)
     );
     res.json(await loadDisplay());
   } catch (err) { next(err); }
+});
+
+// Nightly sync and email notifications (admin only)
+async function automation() {
+  const [schedule, notifications, state] = await Promise.all([getSchedule(), getNotifications(), getScheduleState()]);
+  return { schedule, notifications, email: emailStatus(), lastRun: state.lastStatus ? state : null, nextRun: nextRun(schedule, state) };
+}
+
+router.get('/admin/automation', requirePermission('admin'), async (req, res, next) => {
+  try {
+    res.json(await automation());
+  } catch (err) { next(err); }
+});
+
+router.put('/admin/automation', requirePermission('admin'), async (req, res, next) => {
+  const error = validateAutomation(req.body ?? {});
+  if (error) return res.status(400).json({ error });
+  try {
+    await saveAutomation(req.body, req.user.id);
+    res.json(await automation());
+  } catch (err) { next(err); }
+});
+
+// Send a test email to the saved recipients
+router.post('/admin/automation/test-email', requirePermission('admin'), async (req, res) => {
+  const { recipients } = await getNotifications();
+  if (!recipients.length) return res.status(400).json({ error: 'Add at least one recipient and save first' });
+  if (!emailStatus().configured) return res.status(400).json({ error: 'Email is not set up on the server (SMTP settings in the backend .env)' });
+  try {
+    await sendEmail({
+      to: recipients,
+      subject: 'AgileMetrix: test email',
+      text: `This is a test from AgileMetrix, sent by ${req.user.name}. Sync notifications will arrive like this.`,
+    });
+    res.json({ sent: recipients.length });
+  } catch (err) {
+    res.status(502).json({ error: `Could not send email: ${err.message}` });
+  }
 });
 
 export default router;

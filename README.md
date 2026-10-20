@@ -12,6 +12,9 @@ npm run dev            # http://localhost:4000
 ```
 Create the database first; see the `agileboard-database` repo.
 
+## Nightly sync and email
+An admin turns on the daily sync in **Workspace Settings → General** (time and time zone, default 22:00) and chooses who gets an email when it succeeds or fails. The server checks every 30 seconds; if it was down at the set time it still runs within the next hour, and only once per day (also with several servers). Email goes through the SMTP server in `.env` (`SMTP_*`); set `SMTP_HOST=log` to print emails to the log while testing.
+
 ## Sign-in
 Everything except `/api/health` needs a signed-in user. Create the first administrator yourself (asks for name, username and a hidden password):
 ```bash
@@ -56,6 +59,8 @@ Tests for the Jira mapping: `npm test`.
 | POST | `/api/auth/login`, `/api/auth/logout` | Sign in (username + password) / sign out |
 | GET | `/api/auth/me` | The signed-in user and their permissions |
 | GET / PUT | `/api/settings`, `/api/admin/settings` | Workspace date format (`DD MMM YYYY`, `DD/MM/YYYY`, `MM/DD/YYYY`, `YYYY-MM-DD`) and time format (`12h` / `24h`); PUT needs `admin` |
+| GET / PUT | `/api/admin/automation` | Nightly sync schedule (`enabled`, `time` e.g. `22:00`, `timeZone`) and email notifications (`onSuccess`, `onFailure`, `recipients`); admin only |
+| POST | `/api/admin/automation/test-email` | Send a test email to the saved recipients |
 | PUT | `/api/sprints/:id/goal-outcome` | Record a sprint's goal outcome (`met`, `partly_met`, `not_met`, or `null` to clear) with an optional note; needs `edit`. Issues labelled `sprint-goal` in Jira (`SPRINT_GOAL_LABEL`) are the goal items used for the suggested outcome |
 | GET / PUT | `/api/me/preferences` | The signed-in user's dashboard layout (`dashboardLayout`: `[{ id, size, hidden }]`, or `null` for the default) |
 | GET | `/api/admin/jira/projects`, `/api/admin/jira/projects/:key/boards` | Active Jira projects (for Add Project) and a project's Scrum boards (filled in as teams) |
