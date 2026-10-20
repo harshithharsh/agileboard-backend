@@ -1,6 +1,6 @@
 {
   "name": "agileboard-backend",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "AgileBoard REST API (Node.js + Express + PostgreSQL)",
   "main": "src/server.js",
   "type": "module",
