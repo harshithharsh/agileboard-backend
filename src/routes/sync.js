@@ -1,13 +1,14 @@
 import { Router } from 'express';
-import { syncFromJira, lastSync, isSyncRunning } from '../jira/sync.js';
+import { syncFromJira, lastSync, isSyncRunning, syncProgress } from '../jira/sync.js';
 import { requirePermission } from '../auth/middleware.js';
 
 const router = Router();
 
-// Status of the latest sync: { latest: { status: running | success | failed, message, ... }, lastSuccessAt }
+// Status of the latest sync: { latest: { status, message, ... }, lastSuccessAt, running,
+// progress: { phase: connecting | planning | syncing, sprintsDone, sprintsTotal, current, percent, startedAt } | null }
 router.get('/sync', async (req, res, next) => {
   try {
-    res.json({ ...(await lastSync()), running: isSyncRunning() });
+    res.json({ ...(await lastSync()), running: isSyncRunning(), progress: syncProgress() });
   } catch (err) { next(err); }
 });
 
@@ -20,7 +21,8 @@ router.post('/sync', requirePermission('edit'), async (req, res, next) => {
     if (!alreadyRunning) {
       syncFromJira({ log: () => {} }).catch((err) => console.error('Jira sync failed:', err.message));
     }
-    res.status(202).json({ started: !alreadyRunning, running: true });
+    // Only one sync runs at a time: a second click (or another user) just follows the running one
+    res.status(202).json({ started: !alreadyRunning, running: true, progress: syncProgress() });
   } catch (err) { next(err); }
 });
 

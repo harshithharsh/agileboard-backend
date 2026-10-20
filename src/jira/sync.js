@@ -123,31 +123,44 @@ async function saveSprint(team, sprint, records, timeZone) {
   }
 }
 
-async function syncTeam(jira, team, fields, statusById, log, timeZone) {
+// Which sprints of a team's board to pull, and which statuses count as done on that board
+async function planTeam(jira, team, log) {
   const all = await jira.boardSprints(team.jira_board_id);
   // Completed = the board's Done column, like Jira's sprint report
   const doneIds = jira.boardConfiguration ? doneStatusIds(await jira.boardConfiguration(team.jira_board_id)) : new Set();
   const sprints = pickSprints(all, team.jira_board_id, SYNC_CLOSED_SPRINTS, SYNC_SINCE);
   log(`${team.name} (board ${team.jira_board_id}): ${sprints.map((s) => s.name).join(', ') || 'no sprints'}`);
+  return { team, sprints, doneIds };
+}
 
+async function syncSprint(jira, { team, doneIds }, sprint, fields, statusById, log, timeZone) {
   const requestFields = ['summary', 'status', 'issuetype', 'assignee', 'creator', 'reporter', 'created', 'resolutiondate', 'labels',
     'environment', 'priority', 'fixVersions', 'description', fields.storyPoints, fields.sprint].filter(Boolean);
-
-  for (const sprint of sprints) {
-    const issues = (await jira.sprintIssues(sprint.id, requestFields)).filter(
-      // Epics are skipped; sub-tasks are kept for the Issues by Type count but excluded from metrics
-      (i) => !/epic/i.test(i.fields.issuetype?.name || '')
-    );
-    const records = [];
-    for (const issue of issues) {
-      let histories = issue.changelog?.histories || [];
-      if (issue.changelog && issue.changelog.total > histories.length) histories = await jira.issueChangelog(issue.id);
-      records.push(transformIssue(issue, histories, { sprint, fields, statusById, doneStatusIds: doneIds }));
-    }
-    await saveSprint(team, sprint, records, timeZone);
-    log(`  ${sprint.name} [${sprint.state}]: ${records.length} issues`);
+  const issues = (await jira.sprintIssues(sprint.id, requestFields)).filter(
+    // Epics are skipped; sub-tasks are kept for the Issues by Type count but excluded from metrics
+    (i) => !/epic/i.test(i.fields.issuetype?.name || '')
+  );
+  Object.assign(progress, { issuesTotal: issues.length, issuesDone: 0 });
+  const records = [];
+  for (const issue of issues) {
+    let histories = issue.changelog?.histories || [];
+    if (issue.changelog && issue.changelog.total > histories.length) histories = await jira.issueChangelog(issue.id);
+    records.push(transformIssue(issue, histories, { sprint, fields, statusById, doneStatusIds: doneIds }));
+    progress.issuesDone += 1;
   }
-  return sprints.length;
+  await saveSprint(team, sprint, records, timeZone);
+  log(`  ${sprint.name} [${sprint.state}]: ${records.length} issues`);
+}
+
+// Progress of the running sync, for the dashboard's progress bar (null when idle)
+let progress = null;
+export function syncProgress() {
+  if (!progress) return null;
+  const { phase, sprintsTotal, sprintsDone, issuesTotal, issuesDone, current, startedAt } = progress;
+  // Each sprint is one step; the sprint being pulled counts by how many of its issues are done
+  const partial = issuesTotal ? issuesDone / issuesTotal : 0;
+  const percent = phase === 'syncing' && sprintsTotal ? Math.min(99, Math.floor(((sprintsDone + partial) / sprintsTotal) * 100)) : 0;
+  return { phase, sprintsTotal, sprintsDone, current, percent, startedAt };
 }
 
 // `jira` can be injected (e.g. a stub in tests); by default a real client is created from .env
@@ -155,6 +168,7 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
   if (running) return running;
   running = (async () => {
     const { rows: [run] } = await query(`INSERT INTO sync_runs DEFAULT VALUES RETURNING id`);
+    progress = { phase: 'connecting', sprintsTotal: 0, sprintsDone: 0, issuesTotal: 0, issuesDone: 0, current: null, startedAt: new Date().toISOString() };
     try {
       const jira = injected ?? createJiraClient();
       // Check the login first: without it Jira still answers some calls, which hides the real problem
@@ -173,8 +187,22 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
         `SELECT t.* FROM teams t JOIN projects p ON p.id = t.project_id
           WHERE t.jira_board_id IS NOT NULL AND p.status = 'active' ORDER BY t.name`
       );
-      let sprintCount = 0;
-      for (const team of teams) sprintCount += await syncTeam(jira, team, fields, statusById, log, timeZone);
+      // First work out every sprint to pull (so the progress bar knows the total), then pull them
+      progress.phase = 'planning';
+      const plans = [];
+      for (const team of teams) {
+        progress.current = team.name;
+        plans.push(await planTeam(jira, team, log));
+      }
+      Object.assign(progress, { phase: 'syncing', sprintsTotal: plans.reduce((n, p) => n + p.sprints.length, 0) });
+      for (const plan of plans) {
+        for (const sprint of plan.sprints) {
+          progress.current = sprint.name;
+          await syncSprint(jira, plan, sprint, fields, statusById, log, timeZone);
+          Object.assign(progress, { sprintsDone: progress.sprintsDone + 1, issuesTotal: 0, issuesDone: 0 });
+        }
+      }
+      const sprintCount = progress.sprintsDone;
 
       const message = `Synced ${sprintCount} sprints for ${teams.length} teams`;
       await query(`UPDATE sync_runs SET status = 'success', finished_at = now(), message = $2 WHERE id = $1`, [run.id, message]);
@@ -186,6 +214,7 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
     }
   })().finally(() => {
     running = null;
+    progress = null;
   });
   return running;
 }
