@@ -30,7 +30,7 @@ const num = (v) => (v == null ? null : Number(v));
 
 router.get('/resources', async (req, res, next) => {
   try {
-    const [settings, projects, links, teams, entries, rUsers, syncRuns] = await Promise.all([
+    const [settings, projects, links, teams, entries, rUsers, syncRuns, holidays] = await Promise.all([
       query(`SELECT value FROM app_settings WHERE key = 'resource_rules'`),
       query(`SELECT id, key, name FROM projects WHERE status = 'active' ORDER BY name`),
       query(`SELECT l.project_id, l.redmine_project_id, l.redmine_project_name FROM redmine_project_links l`),
@@ -40,6 +40,7 @@ router.get('/resources', async (req, res, next) => {
       query(`SELECT ru.id, ru.name, ru.user_id, ru.ignored FROM redmine_users ru
               WHERE EXISTS (SELECT 1 FROM redmine_time_entries e WHERE e.redmine_user_id = ru.id AND e.spent_on >= $1)`, [SYNC_SINCE]),
       query(`SELECT id, started_at, finished_at, status, entries, users, message FROM redmine_sync_runs ORDER BY started_at DESC LIMIT 20`),
+      query(`SELECT day::text AS date, name FROM holidays ORDER BY day`),
     ]);
 
     // People: on a team of an active project, matched to a Redmine person, or with FTE / allocations set
@@ -76,6 +77,7 @@ router.get('/resources', async (req, res, next) => {
       ...saved,
       activities,
       eligibleActivities: saved.eligibleActivities ?? activities.filter((a) => !LEAVE.test(a)),
+      holidays: holidays.rows,
     };
     const linkOf = new Map(links.rows.map((l) => [l.project_id, l]));
 
