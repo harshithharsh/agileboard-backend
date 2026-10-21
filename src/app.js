@@ -10,6 +10,7 @@ import sprints from './routes/sprints.js';
 import settings from './routes/settings.js';
 import integrations from './routes/integrations.js';
 import redmine from './routes/redmine.js';
+import resources from './routes/resources.js';
 import { requireAuth, requirePermission } from './auth/middleware.js';
 
 const app = express();
@@ -39,6 +40,7 @@ app.use('/api', sprints);
 app.use('/api', settings);
 app.use('/api', integrations);
 app.use('/api', redmine);
+app.use('/api', resources);
 
 app.use((err, req, res, next) => {
   console.error(err);
