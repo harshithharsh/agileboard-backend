@@ -2,9 +2,11 @@ import 'dotenv/config';
 import app from './app.js';
 import { closeInterruptedSyncs } from './jira/sync.js';
 import { startScheduler } from './services/automation.js';
+import { closeInterruptedRedmineSyncs } from './redmine/sync.js';
 
 const port = process.env.PORT || 4000;
 closeInterruptedSyncs().catch((err) => console.error('Could not tidy up interrupted syncs:', err.message));
+closeInterruptedRedmineSyncs().catch((err) => console.error('Could not tidy up interrupted Redmine imports:', err.message));
 app.listen(port, () => console.log(`AgileBoard API listening on http://localhost:${port}`));
 // Scheduled Jira sync (Workspace Settings → General); SCHEDULER=off disables it, e.g. on a second server
 if (process.env.SCHEDULER !== 'off') startScheduler();
