@@ -56,11 +56,12 @@ router.get('/admin', handle(async (req, res) => {
              FROM roles r LEFT JOIN users u ON u.role_id = r.id
             GROUP BY r.id ORDER BY r.created_at, r.name`),
     query(`SELECT p.id, p.key, p.name, p.description, p.status,
-                  (SELECT count(DISTINCT tm.user_id)::int FROM team_members tm JOIN teams t ON t.id = tm.team_id WHERE t.project_id = p.id) AS members,
+                  (SELECT count(DISTINCT tm.user_id)::int FROM team_members tm JOIN teams t ON t.id = tm.team_id WHERE t.project_id = p.id AND NOT tm.excluded) AS members,
                   (SELECT count(*)::int FROM sprints s JOIN teams t ON t.id = s.team_id WHERE t.project_id = p.id) AS sprints,
                   COALESCE((SELECT json_agg(json_build_object(
                       'id', t.id, 'name', t.name, 'jiraBoardId', t.jira_board_id, 'wipLimit', t.wip_limit,
-                      'sprints', (SELECT count(*)::int FROM sprints s WHERE s.team_id = t.id)) ORDER BY t.name)
+                      'sprints', (SELECT count(*)::int FROM sprints s WHERE s.team_id = t.id),
+                      'members', (SELECT count(*)::int FROM team_members tm WHERE tm.team_id = t.id AND NOT tm.excluded)) ORDER BY t.name)
                     FROM teams t WHERE t.project_id = p.id), '[]') AS teams
              FROM projects p ORDER BY p.name`),
   ]);
@@ -349,6 +350,86 @@ router.put('/admin/projects/:id', handle(async (req, res) => {
   });
   if (!found) return res.status(404).json({ error: 'Project not found' });
   res.json({ ok: true });
+}));
+
+// ---------------------------------------------------------------------------
+// Team members: from Jira (assignees on the team's board), or added here
+// ---------------------------------------------------------------------------
+
+const MEMBER_WINDOW_DAYS = 90; // "people working on the board" = assigned to an issue updated in this window
+
+async function teamMembers(teamId) {
+  const { rows } = await query(
+    `SELECT u.id, u.name, u.email, (u.jira_account_id IS NOT NULL) AS from_jira, tm.source, tm.excluded, tm.added_at,
+            (SELECT count(*)::int FROM issues i JOIN sprint_issues si ON si.issue_id = i.id JOIN sprints s ON s.id = si.sprint_id
+              WHERE i.assignee_id = u.id AND s.team_id = tm.team_id) AS issues
+       FROM team_members tm JOIN users u ON u.id = tm.user_id
+      WHERE tm.team_id = $1 ORDER BY u.name`,
+    [teamId]
+  );
+  return rows;
+}
+
+async function findTeam(id) {
+  const { rows } = await query('SELECT id, name, jira_board_id FROM teams WHERE id = $1', [id]);
+  return rows[0] ?? null;
+}
+
+router.get('/admin/teams/:id/members', handle(async (req, res) => {
+  const team = await findTeam(req.params.id);
+  if (!team) return res.status(404).json({ error: 'Team not found' });
+  res.json({ team: { id: team.id, name: team.name, jiraBoardId: team.jira_board_id }, windowDays: MEMBER_WINDOW_DAYS, members: await teamMembers(team.id) });
+}));
+
+// Ask Jira who is assigned to the board's recent issues; add anyone new (removed members stay removed)
+router.post('/admin/teams/:id/members/fetch', handle(async (req, res) => {
+  const team = await findTeam(req.params.id);
+  if (!team) return res.status(404).json({ error: 'Team not found' });
+  if (!team.jira_board_id) fail('This team has no Jira board');
+  const issues = await fromJira(() => createJiraClient().boardIssues(team.jira_board_id,
+    `assignee is not EMPTY AND updated >= -${MEMBER_WINDOW_DAYS}d`, ['assignee']));
+  const people = new Map();
+  for (const i of issues) {
+    const a = i.fields?.assignee;
+    if (a?.accountId && a.accountType !== 'app') people.set(a.accountId, { name: a.displayName, email: a.emailAddress ?? null });
+  }
+  const added = await inTransaction(async (c) => {
+    let n = 0;
+    for (const [accountId, p] of people) {
+      const { rows } = await c.query(
+        `INSERT INTO users (name, email, jira_account_id) VALUES ($1, $2, $3)
+         ON CONFLICT (jira_account_id) DO UPDATE SET name = EXCLUDED.name, email = COALESCE(EXCLUDED.email, users.email)
+         RETURNING id`,
+        [p.name, p.email, accountId]
+      );
+      const r = await c.query('INSERT INTO team_members (team_id, user_id, source) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [team.id, rows[0].id, 'jira']);
+      n += r.rowCount;
+    }
+    return n;
+  });
+  res.json({ found: people.size, added, members: await teamMembers(team.id) });
+}));
+
+// Add someone by hand, or bring back a removed member
+router.post('/admin/teams/:id/members', handle(async (req, res) => {
+  const userId = req.body?.userId;
+  if (!UUID.test(userId ?? '')) fail('Choose a person');
+  const team = await findTeam(req.params.id);
+  if (!team) return res.status(404).json({ error: 'Team not found' });
+  await query(
+    `INSERT INTO team_members (team_id, user_id, source) VALUES ($1, $2, 'manual')
+     ON CONFLICT (team_id, user_id) DO UPDATE SET excluded = false`,
+    [team.id, userId]
+  );
+  res.json({ members: await teamMembers(team.id) });
+}));
+
+// Remove: kept as excluded so the Jira sync doesn't add them back
+router.delete('/admin/teams/:id/members/:userId', handle(async (req, res) => {
+  if (!UUID.test(req.params.userId)) fail('Invalid person');
+  const r = await query('UPDATE team_members SET excluded = true WHERE team_id = $1 AND user_id = $2', [req.params.id, req.params.userId]);
+  if (!r.rowCount) return res.status(404).json({ error: 'Not a member of this team' });
+  res.json({ members: await teamMembers(req.params.id) });
 }));
 
 router.delete('/admin/projects/:id', handle(async (req, res) => {

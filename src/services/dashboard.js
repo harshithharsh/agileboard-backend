@@ -544,7 +544,7 @@ export async function getFilters() {
     query('SELECT id, project_id, name FROM releases ORDER BY name'),
     query('SELECT id, team_id, release_id, name, start_date, end_date, status FROM sprints ORDER BY start_date DESC'),
     query(
-      `SELECT u.id, u.name, tm.team_id FROM users u JOIN team_members tm ON tm.user_id = u.id ORDER BY u.name`
+      `SELECT u.id, u.name, tm.team_id FROM users u JOIN team_members tm ON tm.user_id = u.id AND NOT tm.excluded ORDER BY u.name`
     ),
   ]);
   return {

@@ -62,6 +62,9 @@ export function createJiraClient(config = jiraConfig()) {
     // Active (not archived or trashed) projects, and the Scrum boards of one project
     projects: () => getAllPaged('/rest/api/3/project/search', { status: 'live', orderBy: 'name', expand: 'description' }, 'values'),
     projectBoards: (projectKey) => getAllPaged('/rest/agile/1.0/board', { projectKeyOrId: projectKey, type: 'scrum' }, 'values'),
+    // Issues on a board (its saved filter), only the fields asked for
+    boardIssues: (boardId, jql, fields) =>
+      getAllPaged(`/rest/agile/1.0/board/${boardId}/issue`, { jql, fields: fields.join(',') }, 'issues'),
     // expand=changelog returns at most 100 histories; fetch the rest when needed
     issueChangelog: (issueId) => getAllPaged(`/rest/api/3/issue/${issueId}/changelog`, {}, 'values'),
   };
