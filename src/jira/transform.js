@@ -21,6 +21,14 @@ export function doneStatusIds(boardConfig) {
   return new Set((last?.statuses || []).map((s) => String(s.id)));
 }
 
+// The field the board estimates with (Board settings → Estimation), as Jira's sprint report uses it.
+// A site can have both "Story point estimate" and "Story Points"; only the board knows which one is filled in.
+// null when the board estimates by issue count or time, or the config has no estimation.
+export function boardEstimationField(boardConfig) {
+  const e = boardConfig?.estimation;
+  return e?.type === 'field' && e.field?.fieldId ? e.field.fieldId : null;
+}
+
 export function mapIssueType(name = '', isSubtask = false) {
   if (isSubtask || /sub-?task/i.test(name)) return 'subtask';
   if (/bug|defect/i.test(name)) return 'bug';

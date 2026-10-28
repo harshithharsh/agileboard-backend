@@ -87,6 +87,14 @@ test('pickSprints keeps active sprints and the latest closed ones from the board
   assert.deepEqual(pickSprints(sprints, 9, 2).map((s) => s.id), [3, 4, 5]);
 });
 
+test("story points come from the board's estimation field", async () => {
+  const { boardEstimationField } = await import('../src/jira/transform.js');
+  assert.equal(boardEstimationField({ estimation: { type: 'field', field: { fieldId: 'customfield_10026', displayName: 'Story Points' } } }), 'customfield_10026');
+  assert.equal(boardEstimationField({ estimation: { type: 'none' } }), null, 'estimated by issue count');
+  assert.equal(boardEstimationField({}), null);
+  assert.equal(boardEstimationField(null), null);
+});
+
 test("statuses in the board's Done column count as done (e.g. Delivered to QA)", async () => {
   const { doneStatusIds } = await import('../src/jira/transform.js');
   const done = doneStatusIds({ columnConfig: { columns: [

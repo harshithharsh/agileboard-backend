@@ -1,6 +1,6 @@
 import { pool, query } from '../config/db.js';
 import { createJiraClient, jiraConfig } from './client.js';
-import { transformIssue, pickSprints, mapSprintState, doneStatusIds, localDate } from './transform.js';
+import { transformIssue, pickSprints, mapSprintState, doneStatusIds, boardEstimationField, localDate } from './transform.js';
 
 export const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
 // Sync every sprint that started since this date, for the quarter filter
@@ -126,14 +126,19 @@ async function saveSprint(team, sprint, records, timeZone) {
 // Which sprints of a team's board to pull, and which statuses count as done on that board
 async function planTeam(jira, team, log) {
   const all = await jira.boardSprints(team.jira_board_id);
+  const config = jira.boardConfiguration ? await jira.boardConfiguration(team.jira_board_id) : null;
   // Completed = the board's Done column, like Jira's sprint report
-  const doneIds = jira.boardConfiguration ? doneStatusIds(await jira.boardConfiguration(team.jira_board_id)) : new Set();
+  const doneIds = config ? doneStatusIds(config) : new Set();
+  // Story points = the board's estimation field, unless JIRA_STORY_POINTS_FIELD overrides it
+  const storyPoints = process.env.JIRA_STORY_POINTS_FIELD || boardEstimationField(config);
   const sprints = pickSprints(all, team.jira_board_id, SYNC_CLOSED_SPRINTS, SYNC_SINCE);
-  log(`${team.name} (board ${team.jira_board_id}): ${sprints.map((s) => s.name).join(', ') || 'no sprints'}`);
-  return { team, sprints, doneIds };
+  log(`${team.name} (board ${team.jira_board_id}): ${sprints.map((s) => s.name).join(', ') || 'no sprints'}${storyPoints ? ` · story points=${storyPoints}` : ''}`);
+  return { team, sprints, doneIds, storyPoints };
 }
 
-async function syncSprint(jira, { team, doneIds }, sprint, fields, statusById, log, timeZone) {
+async function syncSprint(jira, { team, doneIds, storyPoints }, sprint, siteFields, statusById, log, timeZone) {
+  // The board's estimation field if known, otherwise the one detected for the whole site
+  const fields = storyPoints ? { ...siteFields, storyPoints } : siteFields;
   const requestFields = ['summary', 'status', 'issuetype', 'assignee', 'creator', 'reporter', 'created', 'resolutiondate', 'labels',
     'environment', 'priority', 'fixVersions', 'description', fields.storyPoints, fields.sprint].filter(Boolean);
   const issues = (await jira.sprintIssues(sprint.id, requestFields)).filter(
