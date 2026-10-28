@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { query } from '../config/db.js';
-import { createRedmineClient, RedmineConfigError } from '../redmine/client.js';
+import { createRedmineClient, redmineConfig, RedmineConfigError } from '../redmine/client.js';
 import { syncFromRedmine, isRedmineSyncRunning, redmineSyncProgress, autoMatchUsers, SYNC_SINCE } from '../redmine/sync.js';
 
 // Settings → Integrations → Redmine (administrators only: /api/admin is guarded in app.js)
@@ -21,7 +21,7 @@ const fromRedmine = async (res, fn) => {
 // Redmine projects the API key can read, for the link picker
 router.get('/admin/redmine/projects', async (req, res, next) => {
   try {
-    const projects = await fromRedmine(res, () => createRedmineClient().projects());
+    const projects = await fromRedmine(res, async () => createRedmineClient(await redmineConfig()).projects());
     if (!projects) return;
     const { rows } = await query('SELECT redmine_project_id, project_id FROM redmine_project_links');
     const linked = new Map(rows.map((r) => [r.redmine_project_id, r.project_id]));
@@ -71,7 +71,7 @@ router.put('/admin/redmine/links/:projectId', async (req, res, next) => {
     const includeSubprojects = req.body?.includeSubprojects !== false;
     if (!UUID.test(projectId)) return bad(res, 'Invalid project');
     if (!Number.isInteger(redmineProjectId) || redmineProjectId <= 0) return bad(res, 'Choose a Redmine project');
-    const projects = await fromRedmine(res, () => createRedmineClient().projects());
+    const projects = await fromRedmine(res, async () => createRedmineClient(await redmineConfig()).projects());
     if (!projects) return;
     const rp = projects.find((p) => p.id === redmineProjectId);
     if (!rp) return bad(res, 'That Redmine project is not visible to the API key');

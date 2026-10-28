@@ -1,5 +1,5 @@
 import { pool, query } from '../config/db.js';
-import { createRedmineClient } from './client.js';
+import { createRedmineClient, redmineConfig } from './client.js';
 
 // Import time entries of the Redmine projects linked in Settings → Integrations → Redmine.
 // Each run re-reads every entry since SYNC_SINCE, so edits and deletions in Redmine are picked up.
@@ -77,7 +77,7 @@ export async function syncFromRedmine({ trigger = 'manual', userId = null, redmi
     let entries = 0;
     let projects = 0;
     try {
-      const api = redmine ?? createRedmineClient();
+      const api = redmine ?? createRedmineClient(await redmineConfig());
       const { rows: links } = await query(
         `SELECT l.*, p.name AS project_name FROM redmine_project_links l JOIN projects p ON p.id = l.project_id
           WHERE p.status = 'active' ORDER BY p.name`

@@ -3,7 +3,7 @@ import { pool, query } from '../config/db.js';
 import { hashPassword, MIN_PASSWORD_LENGTH } from '../auth/password.js';
 import { readCookie } from '../auth/session.js';
 import { createHash } from 'node:crypto';
-import { createJiraClient } from '../jira/client.js';
+import { createJiraClient, jiraConfig } from '../jira/client.js';
 
 // Admin API: users & role assignment, roles, projects & teams.
 // Access: signed-in users whose role has the 'admin' permission (enforced in app.js).
@@ -302,7 +302,7 @@ const fromJira = async (fn) => {
 // Jira projects to choose from when adding a project; `added` = already in AgileMetrix
 router.get('/admin/jira/projects', handle(async (req, res) => {
   const [jiraProjects, { rows }] = await Promise.all([
-    fromJira(() => createJiraClient().projects()),
+    fromJira(async () => createJiraClient(await jiraConfig()).projects()),
     query('SELECT upper(key) AS key FROM projects'),
   ]);
   const existing = new Set(rows.map((r) => r.key));
@@ -314,7 +314,7 @@ router.get('/admin/jira/projects', handle(async (req, res) => {
 // Scrum boards of a Jira project, offered as the project's teams
 router.get('/admin/jira/projects/:key/boards', handle(async (req, res) => {
   if (!/^[A-Z][A-Z0-9_]{0,19}$/i.test(req.params.key)) fail('Invalid project key');
-  const boards = await fromJira(() => createJiraClient().projectBoards(req.params.key));
+  const boards = await fromJira(async () => createJiraClient(await jiraConfig()).projectBoards(req.params.key));
   res.json(boards.map((b) => ({ id: b.id, name: b.name })));
 }));
 
@@ -386,7 +386,7 @@ router.post('/admin/teams/:id/members/fetch', handle(async (req, res) => {
   const team = await findTeam(req.params.id);
   if (!team) return res.status(404).json({ error: 'Team not found' });
   if (!team.jira_board_id) fail('This team has no Jira board');
-  const issues = await fromJira(() => createJiraClient().boardIssues(team.jira_board_id,
+  const issues = await fromJira(async () => createJiraClient(await jiraConfig()).boardIssues(team.jira_board_id,
     `assignee is not EMPTY AND updated >= -${MEMBER_WINDOW_DAYS}d`, ['assignee']));
   const people = new Map();
   for (const i of issues) {

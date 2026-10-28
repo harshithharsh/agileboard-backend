@@ -2,19 +2,27 @@
 // Docs: https://developer.atlassian.com/cloud/jira/platform/rest/v3/
 //       https://developer.atlassian.com/cloud/jira/software/rest/
 
+import { jiraCredentials } from './credentials.js';
+
 export class JiraConfigError extends Error {}
 
-export function jiraConfig() {
-  const { JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN } = process.env;
-  if (!JIRA_BASE_URL || !JIRA_EMAIL || !JIRA_API_TOKEN) {
-    throw new JiraConfigError('Jira is not configured: set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in .env');
+// Site from .env; email and token from Settings → Integrations → Jira if saved there, otherwise .env
+export async function jiraConfig() {
+  const { JIRA_BASE_URL } = process.env;
+  const { email, token, unreadable } = await jiraCredentials();
+  if (unreadable) {
+    throw new JiraConfigError('The saved Jira API token can’t be read (SECRETS_KEY in the backend .env is missing or changed): enter the token again in Settings → Integrations → Jira');
   }
-  return { baseUrl: JIRA_BASE_URL.replace(/\/$/, ''), email: JIRA_EMAIL, token: JIRA_API_TOKEN };
+  if (!JIRA_BASE_URL || !email || !token) {
+    throw new JiraConfigError('Jira is not configured: set JIRA_BASE_URL in .env, and the account email and API token in Settings → Integrations → Jira (or JIRA_EMAIL and JIRA_API_TOKEN in .env)');
+  }
+  return { baseUrl: JIRA_BASE_URL.replace(/\/$/, ''), email, token };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createJiraClient(config = jiraConfig()) {
+// `config` from jiraConfig()
+export function createJiraClient(config) {
   const auth = `Basic ${Buffer.from(`${config.email}:${config.token}`).toString('base64')}`;
 
   async function get(path, params = {}, attempt = 1) {
@@ -30,7 +38,7 @@ export function createJiraClient(config = jiraConfig()) {
     if (!res.ok) {
       const body = await res.text();
       const hint = res.status === 401
-        ? ' (Jira rejected the login: check JIRA_EMAIL and that JIRA_API_TOKEN is one valid token, pasted once)'
+        ? ' (Jira rejected the login: check the account email and that the API token is one valid token, pasted once)'
         : '';
       throw new Error(`Jira ${res.status} on ${url.pathname}${hint}: ${body.slice(0, 300)}`);
     }

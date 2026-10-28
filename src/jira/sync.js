@@ -1,5 +1,5 @@
 import { pool, query } from '../config/db.js';
-import { createJiraClient } from './client.js';
+import { createJiraClient, jiraConfig } from './client.js';
 import { transformIssue, pickSprints, mapSprintState, doneStatusIds, localDate } from './transform.js';
 
 export const SYNC_CLOSED_SPRINTS = Number(process.env.JIRA_SYNC_CLOSED_SPRINTS || 6);
@@ -163,14 +163,14 @@ export function syncProgress() {
   return { phase, sprintsTotal, sprintsDone, current, percent, startedAt };
 }
 
-// `jira` can be injected (e.g. a stub in tests); by default a real client is created from .env
+// `jira` can be injected (e.g. a stub in tests); by default a real client is created from the saved Jira settings
 export async function syncFromJira({ log = console.log, jira: injected } = {}) {
   if (running) return running;
   running = (async () => {
     const { rows: [run] } = await query(`INSERT INTO sync_runs DEFAULT VALUES RETURNING id`);
     progress = { phase: 'connecting', sprintsTotal: 0, sprintsDone: 0, issuesTotal: 0, issuesDone: 0, current: null, startedAt: new Date().toISOString() };
     try {
-      const jira = injected ?? createJiraClient();
+      const jira = injected ?? createJiraClient(await jiraConfig());
       // Check the login first: without it Jira still answers some calls, which hides the real problem
       const me = injected ? null : await jira.get('/rest/api/3/myself');
       // Sprint dates use JIRA_TIMEZONE if set, otherwise the timezone of the Jira account used for syncing

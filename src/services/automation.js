@@ -1,6 +1,7 @@
 import { query } from '../config/db.js';
 import { syncFromJira } from '../jira/sync.js';
 import { syncFromRedmine } from '../redmine/sync.js';
+import { redmineCredentials } from '../redmine/credentials.js';
 import { sendEmail, emailStatus } from './mailer.js';
 
 // Scheduled Jira sync and its email notifications, configured by an admin in Workspace Settings.
@@ -104,7 +105,8 @@ export async function runScheduledSync(date) {
   }
   // Then the Redmine time entries, when Redmine is set up and a project is linked
   const { rows: links } = await query('SELECT 1 FROM redmine_project_links LIMIT 1').catch(() => ({ rows: [] }));
-  if (process.env.REDMINE_URL && process.env.REDMINE_API_KEY && links.length) {
+  const redmine = await redmineCredentials().catch(() => ({}));
+  if (redmine.url && (redmine.key || redmine.unreadable) && links.length) {
     try {
       const r = await syncFromRedmine({ trigger: 'scheduled' });
       result.message += `. Redmine: ${r.message}`;

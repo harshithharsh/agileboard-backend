@@ -1,19 +1,26 @@
 // Minimal Redmine REST client (API key). Docs: https://www.redmine.org/projects/redmine/wiki/Rest_api
 
+import { redmineCredentials } from './credentials.js';
+
 export class RedmineConfigError extends Error {}
 
-export function redmineConfig() {
-  const { REDMINE_URL, REDMINE_API_KEY } = process.env;
-  if (!REDMINE_URL || !REDMINE_API_KEY) {
-    throw new RedmineConfigError('Redmine is not configured: set REDMINE_URL and REDMINE_API_KEY in the backend .env, then restart it');
+// URL and API key from Settings → Integrations → Redmine if saved there, otherwise .env
+export async function redmineConfig() {
+  const { url, key, unreadable } = await redmineCredentials();
+  if (unreadable) {
+    throw new RedmineConfigError('The saved Redmine API key can’t be read (SECRETS_KEY in the backend .env is missing or changed): enter the key again in Settings → Integrations → Redmine');
   }
-  return { baseUrl: REDMINE_URL.replace(/\/$/, ''), key: REDMINE_API_KEY };
+  if (!url || !key) {
+    throw new RedmineConfigError('Redmine is not configured: enter the URL and API key in Settings → Integrations → Redmine (or REDMINE_URL and REDMINE_API_KEY in the backend .env)');
+  }
+  return { baseUrl: url.replace(/\/$/, ''), key };
 }
 
 const PAGE = 100; // Redmine's maximum page size
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function createRedmineClient(config = redmineConfig()) {
+// `config` from redmineConfig()
+export function createRedmineClient(config) {
   async function get(path, params = {}, attempt = 1) {
     const url = new URL(path, `${config.baseUrl}/`);
     for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) url.searchParams.set(k, v);

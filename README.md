@@ -30,6 +30,7 @@ After that, administrators give other people a username and password in **Admin 
 ## Jira sync
 1. Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens
 2. In `.env`, set `JIRA_BASE_URL`, `JIRA_EMAIL` (your Atlassian login) and `JIRA_API_TOKEN`. Never commit `.env`.
+   Or set `JIRA_BASE_URL` and `SECRETS_KEY` (any long random string) in `.env`, and have an administrator enter the email and token in **Settings → Integrations → Jira → Edit**. The token is checked with Jira, stored AES-256-GCM encrypted in `app_settings`, and used instead of the `.env` values; **Use .env instead** removes it. Changing `SECRETS_KEY` means entering the token again.
 3. Run `npm run sync`, or click **Refresh** on the dashboard (calls `POST /api/sync`).
 
 Sprint start and end dates are converted from Jira's UTC timestamps to `JIRA_TIMEZONE` (default: the syncing Jira account's timezone), so they match the dates shown in Jira.
