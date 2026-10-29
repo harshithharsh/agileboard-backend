@@ -162,6 +162,34 @@ router.post('/admin/users', handle(async (req, res) => {
   res.status(201).json({ id });
 }));
 
+// Add everyone who can work on the active projects in Jira (assignable, active, a real person) as a
+// user: no sign-in, no role and no team, so dashboards and capacity don't change. Existing users
+// (same Jira account or email) are left as they are. Safe to run again when people join.
+router.post('/admin/users/import-jira', handle(async (req, res) => {
+  const { rows: projects } = await query(`SELECT key FROM projects WHERE status = 'active' ORDER BY key`);
+  if (!projects.length) fail('There are no active projects to take people from');
+  const jira = await fromJira(async () => createJiraClient(await jiraConfig()));
+  const people = new Map();
+  for (const p of projects) {
+    for (let startAt = 0; ; startAt += 100) {
+      const page = await fromJira(() => jira.get('/rest/api/3/user/assignable/search', { project: p.key, startAt, maxResults: 100 }));
+      for (const u of page) if (u.accountType === 'atlassian' && u.active) people.set(u.accountId, u);
+      if (page.length < 100) break;
+    }
+  }
+  const added = [];
+  await inTransaction(async (c) => {
+    for (const u of people.values()) {
+      const { rowCount } = await c.query(
+        `INSERT INTO users (name, email, jira_account_id, status) VALUES ($1, $2, $3, 'active') ON CONFLICT DO NOTHING`,
+        [u.displayName.slice(0, 120), u.emailAddress || null, u.accountId]
+      );
+      if (rowCount) added.push(u.displayName);
+    }
+  });
+  res.json({ found: people.size, added: added.length, names: added.sort((a, b) => a.localeCompare(b)) });
+}));
+
 router.put('/admin/users/:id', handle(async (req, res) => {
   const u = userInput(req.body ?? {});
   const isSelf = req.params.id === req.user.id;
