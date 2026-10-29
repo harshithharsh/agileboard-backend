@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
+    "dev": "node --watch-path=src src/server.js",
     "sync": "node scripts/sync.js",
     "test": "node --test",
     "create-admin": "node scripts/create-admin.js"
