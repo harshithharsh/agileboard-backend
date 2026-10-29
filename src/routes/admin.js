@@ -165,6 +165,8 @@ router.post('/admin/users', handle(async (req, res) => {
 // Add everyone who can work on the active projects in Jira (assignable, active, a real person) as a
 // user: no sign-in, no role and no team, so dashboards and capacity don't change. Existing users
 // (same Jira account or email) are left as they are. Safe to run again when people join.
+// Users whose Jira account is deactivated are made inactive here too (and signed out). Users active in
+// Jira are never reactivated: an admin may have deactivated them on purpose.
 router.post('/admin/users/import-jira', handle(async (req, res) => {
   const { rows: projects } = await query(`SELECT key FROM projects WHERE status = 'active' ORDER BY key`);
   if (!projects.length) fail('There are no active projects to take people from');
@@ -177,6 +179,16 @@ router.post('/admin/users/import-jira', handle(async (req, res) => {
       if (page.length < 100) break;
     }
   }
+  // Jira's own active flag for every active user linked to a Jira account (50 accounts per request)
+  const { rows: linked } = await query(`SELECT id, name, jira_account_id FROM users WHERE status = 'active' AND jira_account_id IS NOT NULL`);
+  const inactiveInJira = new Set();
+  for (let i = 0; i < linked.length; i += 50) {
+    const ids = linked.slice(i, i + 50).map((u) => `accountId=${encodeURIComponent(u.jira_account_id)}`).join('&');
+    const page = await fromJira(() => jira.get(`/rest/api/3/user/bulk?maxResults=50&${ids}`));
+    for (const u of page.values ?? []) if (u.active === false) inactiveInJira.add(u.accountId);
+  }
+  const toDeactivate = linked.filter((u) => inactiveInJira.has(u.jira_account_id) && u.id !== req.user.id);
+
   const added = [];
   await inTransaction(async (c) => {
     for (const u of people.values()) {
@@ -186,8 +198,18 @@ router.post('/admin/users/import-jira', handle(async (req, res) => {
       );
       if (rowCount) added.push(u.displayName);
     }
+    if (toDeactivate.length) {
+      const ids = toDeactivate.map((u) => u.id);
+      await c.query(`UPDATE users SET status = 'inactive' WHERE id = ANY($1)`, [ids]);
+      await c.query('DELETE FROM sessions WHERE user_id = ANY($1)', [ids]);
+      await ensureAdminRemains(c);
+    }
   });
-  res.json({ found: people.size, added: added.length, names: added.sort((a, b) => a.localeCompare(b)) });
+  const byName = (a, b) => a.localeCompare(b);
+  res.json({
+    found: people.size, added: added.length, names: added.sort(byName),
+    deactivated: toDeactivate.length, deactivatedNames: toDeactivate.map((u) => u.name).sort(byName),
+  });
 }));
 
 router.put('/admin/users/:id', handle(async (req, res) => {
