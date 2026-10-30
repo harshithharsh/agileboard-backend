@@ -34,7 +34,7 @@ router.get('/dashboard', async (req, res, next) => {
   }
   try {
     const data = await getDashboard({ teamId, sprintId, assigneeId, quarter });
-    if (!data) return res.status(404).json({ error: 'No sprints found for this team' });
+    if (!data) return res.status(404).json({ error: 'No sprints found for this squad' });
     res.json(data);
   } catch (err) { next(err); }
 });

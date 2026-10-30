@@ -306,16 +306,16 @@ function projectInput(body) {
     status: oneOf(body.status || 'active', STATUSES, 'Status'),
     teams: teams.map((t, i) => {
       const board = t.jiraBoardId === '' || t.jiraBoardId == null ? null : Number(t.jiraBoardId);
-      if (board !== null && (!Number.isInteger(board) || board <= 0)) fail(`Team ${i + 1}: Jira board id must be a positive number`);
+      if (board !== null && (!Number.isInteger(board) || board <= 0)) fail(`Squad ${i + 1}: Jira board id must be a positive number`);
       const wip = t.wipLimit === '' || t.wipLimit == null ? 5 : Number(t.wipLimit);
-      if (!Number.isInteger(wip) || wip < 1) fail(`Team ${i + 1}: WIP limit must be a whole number of 1 or more`);
-      if (t.id && !UUID.test(t.id)) fail(`Team ${i + 1}: invalid id`);
+      if (!Number.isInteger(wip) || wip < 1) fail(`Squad ${i + 1}: WIP limit must be a whole number of 1 or more`);
+      if (t.id && !UUID.test(t.id)) fail(`Squad ${i + 1}: invalid id`);
       return { id: t.id || null, name: text(t.name, `Team ${i + 1} name`, { required: true, max: 120 }), jiraBoardId: board, wipLimit: wip };
     }),
   };
   if (!/^[A-Z][A-Z0-9_]*$/.test(p.key)) fail('Key must start with a letter and use only letters, numbers or _');
   const names = p.teams.map((t) => t.name.toLowerCase());
-  if (new Set(names).size !== names.length) fail('Team names must be unique within the project');
+  if (new Set(names).size !== names.length) fail('Squad names must be unique within the project');
   return p;
 }
 
@@ -326,7 +326,7 @@ async function saveTeams(c, projectId, teams) {
   );
   const keep = new Set(teams.filter((t) => t.id).map((t) => t.id));
   for (const t of existing.filter((e) => !keep.has(e.id))) {
-    if (t.sprints) fail(`Team "${t.name}" has synced sprints and can't be removed`);
+    if (t.sprints) fail(`Squad "${t.name}" has synced sprints and can't be removed`);
     await c.query('DELETE FROM teams WHERE id = $1', [t.id]);
   }
   for (const t of teams) {
@@ -427,15 +427,15 @@ async function findTeam(id) {
 
 router.get('/admin/teams/:id/members', handle(async (req, res) => {
   const team = await findTeam(req.params.id);
-  if (!team) return res.status(404).json({ error: 'Team not found' });
+  if (!team) return res.status(404).json({ error: 'Squad not found' });
   res.json({ team: { id: team.id, name: team.name, jiraBoardId: team.jira_board_id }, windowDays: MEMBER_WINDOW_DAYS, members: await teamMembers(team.id) });
 }));
 
 // Ask Jira who is assigned to the board's recent issues; add anyone new (removed members stay removed)
 router.post('/admin/teams/:id/members/fetch', handle(async (req, res) => {
   const team = await findTeam(req.params.id);
-  if (!team) return res.status(404).json({ error: 'Team not found' });
-  if (!team.jira_board_id) fail('This team has no Jira board');
+  if (!team) return res.status(404).json({ error: 'Squad not found' });
+  if (!team.jira_board_id) fail('This squad has no Jira board');
   const issues = await fromJira(async () => createJiraClient(await jiraConfig()).boardIssues(team.jira_board_id,
     `assignee is not EMPTY AND updated >= -${MEMBER_WINDOW_DAYS}d`, ['assignee']));
   const people = new Map();
@@ -465,7 +465,7 @@ router.post('/admin/teams/:id/members', handle(async (req, res) => {
   const userId = req.body?.userId;
   if (!UUID.test(userId ?? '')) fail('Choose a person');
   const team = await findTeam(req.params.id);
-  if (!team) return res.status(404).json({ error: 'Team not found' });
+  if (!team) return res.status(404).json({ error: 'Squad not found' });
   await query(
     `INSERT INTO team_members (team_id, user_id, source) VALUES ($1, $2, 'manual')
      ON CONFLICT (team_id, user_id) DO UPDATE SET excluded = false`,
@@ -478,7 +478,7 @@ router.post('/admin/teams/:id/members', handle(async (req, res) => {
 router.delete('/admin/teams/:id/members/:userId', handle(async (req, res) => {
   if (!UUID.test(req.params.userId)) fail('Invalid person');
   const r = await query('UPDATE team_members SET excluded = true WHERE team_id = $1 AND user_id = $2', [req.params.id, req.params.userId]);
-  if (!r.rowCount) return res.status(404).json({ error: 'Not a member of this team' });
+  if (!r.rowCount) return res.status(404).json({ error: 'Not a member of this squad' });
   res.json({ members: await teamMembers(req.params.id) });
 }));
 

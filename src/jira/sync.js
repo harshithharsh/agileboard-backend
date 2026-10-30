@@ -209,7 +209,7 @@ export async function syncFromJira({ log = console.log, jira: injected } = {}) {
       }
       const sprintCount = progress.sprintsDone;
 
-      const message = `Synced ${sprintCount} sprints for ${teams.length} teams`;
+      const message = `Synced ${sprintCount} sprints for ${teams.length} squads`;
       await query(`UPDATE sync_runs SET status = 'success', finished_at = now(), message = $2 WHERE id = $1`, [run.id, message]);
       log(message);
       return { status: 'success', message };

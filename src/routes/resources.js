@@ -128,7 +128,7 @@ router.put('/resources/:id', requirePermission('edit'), async (req, res, next) =
     const weekly = b.weeklyHours == null || b.weeklyHours === '' ? null : Number(b.weeklyHours);
     if (fte !== null && !(fte >= 0 && fte <= 1.5)) return res.status(400).json({ error: 'Employment FTE must be between 0 and 1.5' });
     if (weekly !== null && !(weekly > 0 && weekly <= 80)) return res.status(400).json({ error: 'Weekly hours must be between 1 and 80' });
-    if (b.teamId != null && !UUID.test(b.teamId)) return res.status(400).json({ error: 'Invalid team' });
+    if (b.teamId != null && !UUID.test(b.teamId)) return res.status(400).json({ error: 'Invalid squad' });
     const { rows: [current] } = await query(
       `SELECT (SELECT tm.team_id FROM team_members tm JOIN teams t ON t.id = tm.team_id WHERE tm.user_id = u.id AND NOT tm.excluded ORDER BY t.name LIMIT 1) AS jira_team
          FROM users u WHERE u.id = $1`, [id]
