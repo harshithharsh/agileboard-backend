@@ -375,7 +375,7 @@ router.get('/admin/jira/projects', handle(async (req, res) => {
 router.get('/admin/jira/projects/:key/boards', handle(async (req, res) => {
   if (!/^[A-Z][A-Z0-9_]{0,19}$/i.test(req.params.key)) fail('Invalid project key');
   const boards = await fromJira(async () => createJiraClient(await jiraConfig()).projectBoards(req.params.key));
-  res.json(boards.map((b) => ({ id: b.id, name: b.name })));
+  res.json(boards.map((b) => ({ id: b.id, name: b.name, type: b.type })));
 }));
 
 router.post('/admin/projects', handle(async (req, res) => {

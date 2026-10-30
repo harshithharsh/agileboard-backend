@@ -69,7 +69,9 @@ export function createJiraClient(config) {
       getAllPaged(`/rest/agile/1.0/sprint/${sprintId}/issue`, { fields: fields.join(','), expand: 'changelog' }, 'issues'),
     // Active (not archived or trashed) projects, and the Scrum boards of one project
     projects: () => getAllPaged('/rest/api/3/project/search', { status: 'live', orderBy: 'name', expand: 'description' }, 'values'),
-    projectBoards: (projectKey) => getAllPaged('/rest/agile/1.0/board', { projectKeyOrId: projectKey, type: 'scrum' }, 'values'),
+    // All boards of a project: Scrum boards have sprints; Kanban boards (e.g. chapters) only give members
+    projectBoards: (projectKey) => getAllPaged('/rest/agile/1.0/board', { projectKeyOrId: projectKey }, 'values'),
+    board: (boardId) => get(`/rest/agile/1.0/board/${boardId}`),
     // Issues on a board (its saved filter), only the fields asked for
     boardIssues: (boardId, jql, fields) =>
       getAllPaged(`/rest/agile/1.0/board/${boardId}/issue`, { jql, fields: fields.join(',') }, 'issues'),

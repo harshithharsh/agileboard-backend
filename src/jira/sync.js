@@ -124,7 +124,26 @@ async function saveSprint(team, sprint, records, timeZone) {
 }
 
 // Which sprints of a team's board to pull, and which statuses count as done on that board
+// Kanban boards (e.g. chapters) have no sprints: their squad's members are the people assigned to
+// issues on the board updated in the last 90 days (removed members stay removed)
+const KANBAN_MEMBER_DAYS = 90;
+async function syncKanbanMembers(jira, team, log) {
+  const issues = await jira.boardIssues(team.jira_board_id, `assignee is not EMPTY AND updated >= -${KANBAN_MEMBER_DAYS}d`, ['assignee']);
+  const people = new Map();
+  for (const i of issues) {
+    const a = i.fields?.assignee;
+    if (a?.accountId && a.accountType !== 'app') people.set(a.accountId, { accountId: a.accountId, name: a.displayName, email: a.emailAddress ?? null });
+  }
+  for (const p of people.values()) await upsertUser({ query }, p, team.id);
+  log(`${team.name} (Kanban board ${team.jira_board_id}): no sprints · ${people.size} members`);
+}
+
 async function planTeam(jira, team, log) {
+  const board = jira.board ? await jira.board(team.jira_board_id) : null;
+  if (board && board.type !== 'scrum') {
+    await syncKanbanMembers(jira, team, log);
+    return { team, sprints: [], doneIds: new Set(), storyPoints: null };
+  }
   const all = await jira.boardSprints(team.jira_board_id);
   const config = jira.boardConfiguration ? await jira.boardConfiguration(team.jira_board_id) : null;
   // Completed = the board's Done column, like Jira's sprint report
