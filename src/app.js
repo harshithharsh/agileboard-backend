@@ -12,6 +12,7 @@ import integrations from './routes/integrations.js';
 import redmine from './routes/redmine.js';
 import resources from './routes/resources.js';
 import teamMap from './routes/teamMap.js';
+import reports from './routes/reports.js';
 import { requireAuth, requirePermission } from './auth/middleware.js';
 
 const app = express();
@@ -43,6 +44,7 @@ app.use('/api', integrations);
 app.use('/api', redmine);
 app.use('/api', resources);
 app.use('/api', teamMap);
+app.use('/api', reports);
 
 app.use((err, req, res, next) => {
   console.error(err);
