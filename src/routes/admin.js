@@ -55,7 +55,8 @@ router.get('/admin', handle(async (req, res) => {
     query(`SELECT r.id, r.name, r.description, r.permissions, count(u.id)::int AS users
              FROM roles r LEFT JOIN users u ON u.role_id = r.id
             GROUP BY r.id ORDER BY r.created_at, r.name`),
-    query(`SELECT p.id, p.key, p.name, p.description, p.status,
+    query(`SELECT p.id, p.key, p.name, p.description, p.status, p.manager_id,
+                  (SELECT u.name FROM users u WHERE u.id = p.manager_id) AS manager_name,
                   (SELECT count(DISTINCT tm.user_id)::int FROM team_members tm JOIN teams t ON t.id = tm.team_id WHERE t.project_id = p.id AND NOT tm.excluded) AS members,
                   (SELECT count(*)::int FROM sprints s JOIN teams t ON t.id = s.team_id WHERE t.project_id = p.id) AS sprints,
                   COALESCE((SELECT json_agg(json_build_object(
@@ -304,6 +305,7 @@ function projectInput(body) {
     name: text(body.name, 'Project name', { required: true, max: 120 }),
     description: text(body.description, 'Description', { max: 500 }),
     status: oneOf(body.status || 'active', STATUSES, 'Status'),
+    managerId: body.managerId || null,
     teams: teams.map((t, i) => {
       const board = t.jiraBoardId === '' || t.jiraBoardId == null ? null : Number(t.jiraBoardId);
       if (board !== null && (!Number.isInteger(board) || board <= 0)) fail(`Squad ${i + 1}: Jira board id must be a positive number`);
@@ -314,9 +316,17 @@ function projectInput(body) {
     }),
   };
   if (!/^[A-Z][A-Z0-9_]*$/.test(p.key)) fail('Key must start with a letter and use only letters, numbers or _');
+  if (p.managerId && !UUID.test(p.managerId)) fail('Project manager is not valid');
   const names = p.teams.map((t) => t.name.toLowerCase());
   if (new Set(names).size !== names.length) fail('Squad names must be unique within the project');
   return p;
+}
+
+// The project manager must be an active user
+async function checkManager(c, managerId) {
+  if (!managerId) return;
+  const { rows } = await c.query(`SELECT 1 FROM users WHERE id = $1 AND status = 'active'`, [managerId]);
+  if (!rows.length) fail('The project manager must be an active user');
 }
 
 async function saveTeams(c, projectId, teams) {
@@ -371,9 +381,10 @@ router.get('/admin/jira/projects/:key/boards', handle(async (req, res) => {
 router.post('/admin/projects', handle(async (req, res) => {
   const p = projectInput(req.body ?? {});
   const id = await inTransaction(async (c) => {
+    await checkManager(c, p.managerId);
     const { rows } = await c.query(
-      'INSERT INTO projects (key, name, description, status) VALUES ($1, $2, $3, $4) RETURNING id',
-      [p.key, p.name, p.description, p.status]
+      'INSERT INTO projects (key, name, description, status, manager_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [p.key, p.name, p.description, p.status, p.managerId]
     );
     await saveTeams(c, rows[0].id, p.teams);
     await c.query(
@@ -391,9 +402,10 @@ router.post('/admin/projects', handle(async (req, res) => {
 router.put('/admin/projects/:id', handle(async (req, res) => {
   const p = projectInput(req.body ?? {});
   const found = await inTransaction(async (c) => {
+    await checkManager(c, p.managerId);
     const { rowCount } = await c.query(
-      'UPDATE projects SET key = $2, name = $3, description = $4, status = $5 WHERE id = $1',
-      [req.params.id, p.key, p.name, p.description, p.status]
+      'UPDATE projects SET key = $2, name = $3, description = $4, status = $5, manager_id = $6 WHERE id = $1',
+      [req.params.id, p.key, p.name, p.description, p.status, p.managerId]
     );
     if (rowCount) await saveTeams(c, req.params.id, p.teams);
     return rowCount;
