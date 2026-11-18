@@ -12,10 +12,10 @@ router.get('/sync', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Start a Jira sync (the dashboard's Refresh button). A full sync takes a minute or more, longer than
+// Start a Jira sync (administrators: the Agile Metrics Sync button or Settings). A full sync takes a minute or more, longer than
 // hosting proxies keep a request open (Hostinger's CDN gives up after 60 s), so it runs in the background:
 // this answers 202 straight away and the dashboard polls GET /api/sync until it has finished.
-router.post('/sync', requirePermission('edit'), async (req, res, next) => {
+router.post('/sync', requirePermission('admin'), async (req, res, next) => {
   try {
     const alreadyRunning = isSyncRunning();
     if (!alreadyRunning) {
