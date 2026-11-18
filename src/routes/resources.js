@@ -57,6 +57,9 @@ router.get('/resources', async (req, res, next) => {
            OR EXISTS (SELECT 1 FROM resource_allocations a WHERE a.user_id = u.id))
         ORDER BY u.name`
     );
+    const { rows: leave } = await query(
+      `SELECT id, user_id, start_date::text AS start_date, end_date::text AS end_date, note, modified_by, modified_at FROM resource_leave ORDER BY start_date`
+    );
     const { rows: allocations } = await query(
       `SELECT id, user_id, project_id, fte::float AS fte, start_date::text AS start_date, end_date::text AS end_date, billable, modified_by, modified_at FROM resource_allocations ORDER BY start_date`
     );
@@ -100,7 +103,9 @@ router.get('/resources', async (req, res, next) => {
         id: a.id, resourceId: a.user_id, projectId: a.project_id, fte: a.fte, startDate: a.start_date, endDate: a.end_date ?? null, billable: a.billable !== false,
         modifiedBy: a.modified_by, modifiedAt: a.modified_at,
       })),
-      leave: [],
+      leave: leave.map((l) => ({
+        id: l.id, resourceId: l.user_id, startDate: l.start_date, endDate: l.end_date, note: l.note ?? '', modifiedBy: l.modified_by, modifiedAt: l.modified_at,
+      })),
       redmineUsers: rUsers.rows.filter((u) => !alias.has(u.id) || alias.get(u.id) === u.id)
         .map((u) => ({ id: u.id, login: null, name: u.name.replace(/\s+/g, ' ').trim(), email: null })),
       entries: entries.rows.map((e) => ({
@@ -177,6 +182,39 @@ router.put('/resources/:id/allocations', requirePermission('edit'), async (req, 
          VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, now()))`,
         [UUID.test(a.id ?? '') ? a.id : null, id, a.projectId, Number(a.fte), a.startDate, a.endDate || null, a.billable !== false,
           (a.modifiedBy || req.user.name || '').slice(0, 120), a.modifiedAt || null]
+      );
+    }
+    await c.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await c.query('ROLLBACK');
+    next(err);
+  } finally {
+    c.release();
+  }
+});
+
+
+// Replace one person's leave (Resource allocation → Edit → Leave)
+router.put('/resources/:id/leave', requirePermission('edit'), async (req, res, next) => {
+  const { id } = req.params;
+  if (!UUID.test(id)) return res.status(400).json({ error: 'Invalid person' });
+  const list = Array.isArray(req.body?.leave) ? req.body.leave : null;
+  if (!list) return res.status(400).json({ error: 'leave must be a list' });
+  for (const l of list) {
+    if (!DAY.test(l.startDate ?? '') || !DAY.test(l.endDate ?? '')) return res.status(400).json({ error: 'Leave dates must look like 2026-04-01' });
+    if (l.endDate < l.startDate) return res.status(400).json({ error: 'Leave can’t end before it starts' });
+  }
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query('DELETE FROM resource_leave WHERE user_id = $1', [id]);
+    for (const l of list) {
+      await c.query(
+        `INSERT INTO resource_leave (id, user_id, start_date, end_date, note, modified_by, modified_at)
+         VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, COALESCE($7::timestamptz, now()))`,
+        [UUID.test(l.id ?? '') ? l.id : null, id, l.startDate, l.endDate, String(l.note ?? '').trim().slice(0, 200) || null,
+          (l.modifiedBy || req.user.name || '').slice(0, 120), l.modifiedAt || null]
       );
     }
     await c.query('COMMIT');
