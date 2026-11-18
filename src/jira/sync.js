@@ -19,7 +19,9 @@ async function resolveFields(jira) {
   };
 }
 
-async function upsertUser(client, assignee, teamId) {
+// Squad membership is managed by hand in Settings → Projects; the sync only records who the
+// assignees are and never adds anyone to a squad
+async function upsertUser(client, assignee) {
   if (!assignee) return null;
   const { rows } = await client.query(
     `INSERT INTO users (name, email, jira_account_id) VALUES ($1, $2, $3)
@@ -27,7 +29,6 @@ async function upsertUser(client, assignee, teamId) {
      RETURNING id`,
     [assignee.name, assignee.email, assignee.accountId]
   );
-  await client.query('INSERT INTO team_members (team_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [teamId, rows[0].id]);
   return rows[0].id;
 }
 
@@ -73,7 +74,7 @@ async function saveSprint(team, sprint, records, timeZone) {
     await client.query('DELETE FROM defects WHERE sprint_id = $1', [saved.id]);
 
     for (const r of records) {
-      const assigneeId = await upsertUser(client, r.assignee, team.id);
+      const assigneeId = await upsertUser(client, r.assignee);
       const { rows: [issue] } = await client.query(
         `INSERT INTO issues (project_id, issue_key, title, type, story_points, assignee_id, status, jira_status,
                              started_at, completed_at, dod_met, has_acceptance_criteria, created_at, jira_issue_id, priority, is_goal_item)
@@ -124,24 +125,12 @@ async function saveSprint(team, sprint, records, timeZone) {
 }
 
 // Which sprints of a team's board to pull, and which statuses count as done on that board
-// Kanban boards (e.g. chapters) have no sprints: their squad's members are the people assigned to
-// issues on the board updated in the last 90 days (removed members stay removed)
-const KANBAN_MEMBER_DAYS = 90;
-async function syncKanbanMembers(jira, team, log) {
-  const issues = await jira.boardIssues(team.jira_board_id, `assignee is not EMPTY AND updated >= -${KANBAN_MEMBER_DAYS}d`, ['assignee']);
-  const people = new Map();
-  for (const i of issues) {
-    const a = i.fields?.assignee;
-    if (a?.accountId && a.accountType !== 'app') people.set(a.accountId, { accountId: a.accountId, name: a.displayName, email: a.emailAddress ?? null });
-  }
-  for (const p of people.values()) await upsertUser({ query }, p, team.id);
-  log(`${team.name} (Kanban board ${team.jira_board_id}): no sprints · ${people.size} members`);
-}
-
+// Kanban boards (e.g. chapters) have no sprints, so there is nothing to pull for them; their
+// members are managed by hand like every squad's
 async function planTeam(jira, team, log) {
   const board = jira.board ? await jira.board(team.jira_board_id) : null;
   if (board && board.type !== 'scrum') {
-    await syncKanbanMembers(jira, team, log);
+    log(`${team.name} (Kanban board ${team.jira_board_id}): no sprints`);
     return { team, sprints: [], doneIds: new Set(), storyPoints: null };
   }
   const all = await jira.boardSprints(team.jira_board_id);
