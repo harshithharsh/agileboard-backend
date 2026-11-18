@@ -58,7 +58,7 @@ router.get('/resources', async (req, res, next) => {
         ORDER BY u.name`
     );
     const { rows: allocations } = await query(
-      `SELECT id, user_id, project_id, fte::float AS fte, start_date::text AS start_date, end_date::text AS end_date, modified_by, modified_at FROM resource_allocations ORDER BY start_date`
+      `SELECT id, user_id, project_id, fte::float AS fte, start_date::text AS start_date, end_date::text AS end_date, billable, modified_by, modified_at FROM resource_allocations ORDER BY start_date`
     );
 
     // A person may have more than one Redmine account: count all of them under the first one
@@ -97,7 +97,7 @@ router.get('/resources', async (req, res, next) => {
         employmentFte: num(p.employment_fte), weeklyHours: num(p.weekly_hours), redmineUserId: primary.get(p.id) ?? null,
       })),
       allocations: allocations.map((a) => ({
-        id: a.id, resourceId: a.user_id, projectId: a.project_id, fte: a.fte, startDate: a.start_date, endDate: a.end_date ?? null,
+        id: a.id, resourceId: a.user_id, projectId: a.project_id, fte: a.fte, startDate: a.start_date, endDate: a.end_date ?? null, billable: a.billable !== false,
         modifiedBy: a.modified_by, modifiedAt: a.modified_at,
       })),
       leave: [],
@@ -173,9 +173,9 @@ router.put('/resources/:id/allocations', requirePermission('edit'), async (req, 
     await c.query('DELETE FROM resource_allocations WHERE user_id = $1', [id]);
     for (const a of list) {
       await c.query(
-        `INSERT INTO resource_allocations (id, user_id, project_id, fte, start_date, end_date, modified_by, modified_at)
-         VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, now()))`,
-        [UUID.test(a.id ?? '') ? a.id : null, id, a.projectId, Number(a.fte), a.startDate, a.endDate || null,
+        `INSERT INTO resource_allocations (id, user_id, project_id, fte, start_date, end_date, billable, modified_by, modified_at)
+         VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, now()))`,
+        [UUID.test(a.id ?? '') ? a.id : null, id, a.projectId, Number(a.fte), a.startDate, a.endDate || null, a.billable !== false,
           (a.modifiedBy || req.user.name || '').slice(0, 120), a.modifiedAt || null]
       );
     }
