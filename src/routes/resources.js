@@ -45,7 +45,7 @@ router.get('/resources', async (req, res, next) => {
 
     // People: on a team of an active project, matched to a Redmine person, or with FTE / allocations set
     const { rows: people } = await query(
-      `SELECT u.id, u.name, u.email, rp.employment_fte, rp.weekly_hours, rp.team_id AS team_override,
+      `SELECT u.id, u.name, u.email, rp.employment_fte, rp.weekly_hours, rp.team_id AS team_override, rp.left_on::text AS left_on,
               (SELECT tm.team_id FROM team_members tm JOIN teams t ON t.id = tm.team_id JOIN projects p ON p.id = t.project_id
                 WHERE tm.user_id = u.id AND NOT tm.excluded AND p.status = 'active' ORDER BY t.name LIMIT 1) AS jira_team
          FROM users u LEFT JOIN resource_profiles rp ON rp.user_id = u.id
@@ -98,6 +98,7 @@ router.get('/resources', async (req, res, next) => {
       resources: people.map((p) => ({
         id: p.id, name: p.name, email: p.email, teamId: p.team_override ?? p.jira_team ?? null,
         employmentFte: num(p.employment_fte), weeklyHours: num(p.weekly_hours), redmineUserId: primary.get(p.id) ?? null,
+        leftOn: p.left_on ?? null,
       })),
       allocations: allocations.map((a) => ({
         id: a.id, resourceId: a.user_id, projectId: a.project_id, fte: a.fte, startDate: a.start_date, endDate: a.end_date ?? null, billable: a.billable !== false,
@@ -134,6 +135,7 @@ router.put('/resources/:id', requirePermission('edit'), async (req, res, next) =
     if (fte !== null && !(fte >= 0 && fte <= 1.5)) return res.status(400).json({ error: 'Employment FTE must be between 0 and 1.5' });
     if (weekly !== null && !(weekly > 0 && weekly <= 80)) return res.status(400).json({ error: 'Weekly hours must be between 1 and 80' });
     if (b.teamId != null && !UUID.test(b.teamId)) return res.status(400).json({ error: 'Invalid squad' });
+    if (b.leftOn != null && b.leftOn !== '' && !DAY.test(b.leftOn)) return res.status(400).json({ error: 'The last working day must look like 2026-11-18' });
     const { rows: [current] } = await query(
       `SELECT (SELECT tm.team_id FROM team_members tm JOIN teams t ON t.id = tm.team_id WHERE tm.user_id = u.id AND NOT tm.excluded ORDER BY t.name LIMIT 1) AS jira_team
          FROM users u WHERE u.id = $1`, [id]
@@ -147,6 +149,8 @@ router.put('/resources/:id', requirePermission('edit'), async (req, res, next) =
          team_id = EXCLUDED.team_id, updated_by = EXCLUDED.updated_by, updated_at = now()`,
       [id, fte, weekly, teamOverride, req.user.id]
     );
+    // Left the organization: last working day, or empty when still here (only changed when sent)
+    if (b.leftOn !== undefined) await query('UPDATE resource_profiles SET left_on = $2 WHERE user_id = $1', [id, b.leftOn || null]);
     // Redmine person chosen in the drawer: match it to this person (manual), and unmatch the previous one
     if (b.redmineUserId !== undefined) {
       const ru = b.redmineUserId == null || b.redmineUserId === '' ? null : Number(b.redmineUserId);
