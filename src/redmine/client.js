@@ -64,5 +64,17 @@ export function createRedmineClient(config) {
     projects: () => getAll('projects.json', {}, 'projects', { concurrency: 2 }),
     timeEntries: (projectId, { from, includeSubprojects = true, onPage }) =>
       getAll('time_entries.json', { project_id: projectId, from, ...(includeSubprojects ? {} : { subproject_id: '!*' }) }, 'time_entries', { onPage }),
+    // Issues by id (open and closed), 100 per request, a few requests at a time
+    async issues(ids) {
+      const batches = [];
+      for (let i = 0; i < ids.length; i += PAGE) batches.push(ids.slice(i, i + PAGE));
+      const found = [];
+      for (let i = 0; i < batches.length; i += 4) {
+        const pages = await Promise.all(batches.slice(i, i + 4)
+          .map((b) => get('issues.json', { issue_id: b.join(','), status_id: '*', limit: PAGE })));
+        for (const p of pages) found.push(...p.issues);
+      }
+      return found;
+    },
   };
 }

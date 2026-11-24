@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool, query } from '../config/db.js';
 import { requirePermission } from '../auth/middleware.js';
 import { SYNC_SINCE } from '../redmine/sync.js';
+import { redmineCredentials } from '../redmine/credentials.js';
 
 // Resource Management data: people (AgileMetrix users on the Jira teams or matched to Redmine people),
 // their FTE and allocations, the Jira teams and projects, and the imported Redmine time entries.
@@ -229,6 +230,31 @@ router.put('/resources/:id/leave', requirePermission('edit'), async (req, res, n
   } finally {
     c.release();
   }
+});
+
+// Details of some time entries (the Effort Tracker's day details): comment, issue title and links
+router.get('/resources/time-entries', async (req, res, next) => {
+  try {
+    const ids = String(req.query.ids ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 1000);
+    if (!ids.length) return res.json({ entries: [], redmineUrl: null, jiraUrl: null });
+    const [{ rows }, redmine] = await Promise.all([
+      query(
+        `SELECT e.id, e.spent_on::text AS date, e.hours::float AS hours, e.activity, e.redmine_issue_id, e.jira_key, e.comments,
+                e.redmine_project_name, i.subject
+           FROM redmine_time_entries e LEFT JOIN redmine_issues i ON i.id = e.redmine_issue_id
+          WHERE e.id = ANY($1::int[]) ORDER BY e.spent_on, e.id`, [ids]
+      ),
+      redmineCredentials().catch(() => ({})),
+    ]);
+    res.json({
+      entries: rows.map((e) => ({
+        id: e.id, date: e.date, hours: e.hours, activity: e.activity, issueId: e.redmine_issue_id, issue: e.subject ?? null,
+        jiraKey: e.jira_key, comment: e.comments ?? null, redmineProject: e.redmine_project_name,
+      })),
+      redmineUrl: redmine.url?.replace(/\/$/, '') || null,
+      jiraUrl: process.env.JIRA_BASE_URL?.replace(/\/$/, '') || null,
+    });
+  } catch (err) { next(err); }
 });
 
 export default router;

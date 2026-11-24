@@ -32,16 +32,17 @@ async function importProject(client, link, entries) {
     const c = (fn) => part.map(fn);
     await client.query(
       `INSERT INTO redmine_time_entries
-         (id, project_id, redmine_project_id, redmine_project_name, redmine_user_id, spent_on, hours, activity, redmine_issue_id, jira_key, updated_on)
-       SELECT id, $2, rp, rpn, ru, so, h, act, iss, jk, uo
-         FROM unnest($1::int[], $3::int[], $4::text[], $5::int[], $6::date[], $7::numeric[], $8::text[], $9::int[], $10::text[], $11::timestamptz[])
-              AS t(id, rp, rpn, ru, so, h, act, iss, jk, uo)
+         (id, project_id, redmine_project_id, redmine_project_name, redmine_user_id, spent_on, hours, activity, redmine_issue_id, jira_key, updated_on, comments)
+       SELECT id, $2, rp, rpn, ru, so, h, act, iss, jk, uo, cm
+         FROM unnest($1::int[], $3::int[], $4::text[], $5::int[], $6::date[], $7::numeric[], $8::text[], $9::int[], $10::text[], $11::timestamptz[], $12::text[])
+              AS t(id, rp, rpn, ru, so, h, act, iss, jk, uo, cm)
        ON CONFLICT (id) DO UPDATE SET project_id = EXCLUDED.project_id, redmine_project_id = EXCLUDED.redmine_project_id,
          redmine_project_name = EXCLUDED.redmine_project_name, redmine_user_id = EXCLUDED.redmine_user_id, spent_on = EXCLUDED.spent_on,
          hours = EXCLUDED.hours, activity = EXCLUDED.activity, redmine_issue_id = EXCLUDED.redmine_issue_id,
-         jira_key = EXCLUDED.jira_key, updated_on = EXCLUDED.updated_on`,
+         jira_key = EXCLUDED.jira_key, updated_on = EXCLUDED.updated_on, comments = EXCLUDED.comments`,
       [c((e) => e.id), link.project_id, c((e) => e.project.id), c((e) => e.project.name), c((e) => e.user.id), c((e) => e.spent_on),
-        c((e) => e.hours), c((e) => e.activity?.name ?? null), c((e) => e.issue?.id ?? null), c((e) => jiraKey(e)), c((e) => e.updated_on ?? null)]
+        c((e) => e.hours), c((e) => e.activity?.name ?? null), c((e) => e.issue?.id ?? null), c((e) => jiraKey(e)), c((e) => e.updated_on ?? null),
+        c((e) => (e.comments ?? '').trim() || null)]
     );
   }
   // Deleted in Redmine (or moved out of the linked project) since the start date
@@ -110,6 +111,24 @@ export async function syncFromRedmine({ trigger = 'manual', userId = null, redmi
         progress = { ...progress, projectsDone: progress.projectsDone + 1 };
       }
       await autoMatchUsers();
+      // Titles of the issues time was logged on (shown in the Effort Tracker's day details); a failure
+      // here doesn't fail the import
+      try {
+        progress = { ...progress, current: 'Reading issue titles', entries: 0, total: 0 };
+        const { rows: ids } = await query(
+          'SELECT DISTINCT redmine_issue_id AS id FROM redmine_time_entries WHERE redmine_issue_id IS NOT NULL AND spent_on >= $1', [SYNC_SINCE]
+        );
+        const issues = await api.issues(ids.map((r) => r.id));
+        if (issues.length) {
+          await query(
+            `INSERT INTO redmine_issues (id, subject) SELECT * FROM unnest($1::int[], $2::text[])
+             ON CONFLICT (id) DO UPDATE SET subject = EXCLUDED.subject, updated_at = now()`,
+            [issues.map((i) => i.id), issues.map((i) => i.subject ?? '')]
+          );
+        }
+      } catch (err) {
+        console.error('Redmine issue titles:', err.message);
+      }
       const { rows: [u] } = await query(
         'SELECT count(DISTINCT redmine_user_id)::int AS n FROM redmine_time_entries WHERE spent_on >= $1', [SYNC_SINCE]
       );
